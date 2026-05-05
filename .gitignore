@@ -5,3 +5,4 @@
 *.joblib
 __pycache__/
 *.pyc
+.env
