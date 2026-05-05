@@ -5,10 +5,14 @@ from telegram import Update
 from telegram.error import BadRequest, TelegramError
 from telegram.ext import ContextTypes
 
-from .config import ALLOWED_CHAT_IDS, DEFAULT_THRESHOLD
+from .config import (
+    ALLOWED_CHAT_IDS, DEFAULT_THRESHOLD, PAPER_STARTING_BALANCE_USD,
+    ML_LABEL_WINDOW, PUMP_THRESHOLD_PCT, RUG_THRESHOLD_PCT,
+)
 from .db import set_state, upsert_chat
 from .keyboards import (
     MENU_HEADER, back_keyboard, main_menu_keyboard, threshold_keyboard,
+    more_keyboard,
 )
 from .market import MarketContext
 from .scoring import ScoringEngine
@@ -18,12 +22,70 @@ from .ui_text import (
     text_keywords, text_market, text_model, text_monitor_status,
     text_outcomes, text_paper_report, text_paper_status,
     text_scoring_mode, text_snapshot, text_stats, text_wallet,
+    text_health, text_help, text_real_status, text_real_report,
+    text_last_trade,
 )
 from .utils import mdbold, mdcode, strip_md2
 from .commands import do_train
 
 log = logging.getLogger(__name__)
 PM = "MarkdownV2"
+
+
+async def _do_backtest() -> str:
+    """Run backtest and return formatted text."""
+    from .commands import query_top_performers, format_top_performers
+    from .config import PUMP_THRESHOLD_PCT, RUG_THRESHOLD_PCT
+    from .db import db_conn
+    from collections import defaultdict
+    from .utils import closing, fmt_pct, fmt_usd, mdbold, mdcode, safe_float, safe_int
+
+    with closing(db_conn()) as conn:
+        rows = conn.execute("""
+            SELECT s.score, lb.outcome, lb.pct_change
+            FROM signals s
+            JOIN lookbacks lb ON lb.signal_id = s.id
+            WHERE lb.window_label = ?
+              AND lb.checked = 1
+              AND lb.outcome IS NOT NULL
+            ORDER BY s.score
+        """, (ML_LABEL_WINDOW,)).fetchall()
+
+    if not rows:
+        return mditalic("No labeled data yet — check back later")
+
+    buckets: dict[str, list[float]] = defaultdict(list)
+    for r in rows:
+        score = safe_int(r["score"])
+        pct   = safe_float(r["pct_change"])
+        if   score >= 9: bucket = "9-10 🔥"
+        elif score >= 7: bucket = "7-8 ⭐"
+        elif score >= 5: bucket = "5-6 👍"
+        else:            bucket = "1-4 🤔"
+        buckets[bucket].append(pct)
+
+    lines = [
+        f"🎯 {mdbold('Backtest Results')}",
+        f"{mditalic(f'Label window: {ML_LABEL_WINDOW} | {len(rows)} total labeled signals')}",
+        "",
+    ]
+    for bucket in ["9-10 🔥", "7-8 ⭐", "5-6 👍", "1-4 🤔"]:
+        vals = buckets.get(bucket, [])
+        if not vals:
+            continue
+        n = len(vals)
+        pumps = sum(1 for v in vals if v >= PUMP_THRESHOLD_PCT)
+        rugs  = sum(1 for v in vals if v <= RUG_THRESHOLD_PCT)
+        avg_pct = sum(vals) / n
+        lines += [
+            f"{mdbold(bucket)}",
+            f"Signals {mdcode(n)} | "
+            f"Pump rate {mdcode(f'{pumps/n*100:.1f}%')} | "
+            f"Rug rate {mdcode(f'{rugs/n*100:.1f}%')}",
+            f"Avg outcome {mdcode(fmt_pct(avg_pct, 1, signed=True))}",
+            "",
+        ]
+    return "\n".join(lines)
 
 
 async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -125,7 +187,7 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         elif data == "model":        await show(text_model(engine))
         elif data == "snapshot":     await show(text_snapshot())
         elif data == "stats":        await show(text_stats(state, engine))
-        elif data == "wallet":       await show(text_wallet())
+        elif data == "wallet":       await show(await text_wallet())
 
         elif data == "top":
             rows = query_top_performers(days=7)
@@ -154,6 +216,37 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         elif data == "paper_status": await show(text_paper_status(state))
         elif data == "paper_report": await show(text_paper_report(state))
+
+        # ---------- More menu ----------
+        elif data == "more":
+            await show(
+                f"⚙️ {mdbold('More Options')}",
+                kb=more_keyboard(),
+            )
+
+        elif data == "health":      await show(text_health(state, engine))
+        elif data == "help":        await show(text_help())
+        elif data == "backtest":
+            await show("📊 Running backtest\\.\\.\\.")
+            await show(await _do_backtest())
+        elif data == "last":        await show(text_last_trade())
+        elif data == "real_on":
+            if not real_engine.enabled:
+                await real_engine.set_enabled(True)
+                set_state("real_trading_enabled", "1")
+            await show(f"✅ {mdbold('Real trading ON')} — network: {mdcode(SOLANA_NETWORK)}")
+        elif data == "real_off":
+            await real_engine.set_enabled(False)
+            set_state("real_trading_enabled", "0")
+            await show(f"❌ {mdbold('Real trading OFF')}")
+        elif data == "real_status": await show(text_real_status(engine))
+        elif data == "real_report": await show(text_real_report())
+        elif data == "wallet_reset":
+            PaperWallet.reset(PAPER_STARTING_BALANCE_USD)
+            await show(
+                f"✅ Wallet reset to {mdcode(fmt_usd(PAPER_STARTING_BALANCE_USD, 2))}\n"
+                f"{mditalic('Note: open positions remain — close them manually if needed.')}"
+            )
 
         else:
             try:

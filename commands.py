@@ -335,7 +335,7 @@ async def cmd_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_wallet(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await _check_allowed(update): return
-    await _reply(update, text_wallet())
+    await _reply(update, await text_wallet())
 
 
 async def cmd_wallet_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):

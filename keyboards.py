@@ -41,7 +41,33 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("📋 Paper Stats",  callback_data="paper_status"),
             InlineKeyboardButton("📑 Paper Report", callback_data="paper_report"),
         ],
+        [
+            InlineKeyboardButton("⚡ Real ON",  callback_data="real_on"),
+            InlineKeyboardButton("⛔ Real OFF", callback_data="real_off"),
+        ],
+        [
+            InlineKeyboardButton("📊 Real Status",  callback_data="real_status"),
+            InlineKeyboardButton("📑 Real Report", callback_data="real_report"),
+        ],
+        [InlineKeyboardButton("⚙️ More…", callback_data="more")],
         [InlineKeyboardButton("✖ Close", callback_data="close_menu")],
+    ])
+
+
+def more_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("❤️ Health",    callback_data="health"),
+            InlineKeyboardButton("❓ Help",      callback_data="help"),
+        ],
+        [
+            InlineKeyboardButton("📊 Backtest",  callback_data="backtest"),
+            InlineKeyboardButton("⚡ Last Trade", callback_data="last"),
+        ],
+        [
+            InlineKeyboardButton("🔄 Reset Wallet", callback_data="wallet_reset"),
+        ],
+        [InlineKeyboardButton("🔙 Main Menu", callback_data="menu")],
     ])
 
 

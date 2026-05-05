@@ -21,6 +21,7 @@ from .utils import (
     mdbold, mdcode, mditalic, now_ts, safe_float, safe_int, score_emoji,
 )
 from .wallet import PaperWallet, daily_pnl_usd, recent_loss_streak
+from .real_trading import get_wallet_sol_balance, SOLANA_NETWORK
 
 
 # ---------- Status ----------
@@ -580,12 +581,16 @@ def text_stats(state: BotState, engine: ScoringEngine) -> str:
     return "\n".join(lines)
 
 
-def text_wallet() -> str:
+async def text_wallet() -> str:
     eq = PaperWallet.equity()
     starting = eq["starting"]
     total    = eq["total_equity"]
     pnl_pct  = ((total - starting) / starting * 100) if starting > 0 else 0
     pnl_e    = "🟢" if pnl_pct > 0 else ("🔴" if pnl_pct < 0 else "⚪")
+
+    sol_bal = await get_wallet_sol_balance()
+    sol_line = f"SOL: {mdcode(f'{sol_bal:.4f} SOL')} ({mdcode(fmt_usd(sol_bal * 180, 2))})"
+
     return "\n".join([
         f"💰 {mdbold('Paper Wallet')}",
         "",
@@ -597,6 +602,9 @@ def text_wallet() -> str:
         f"Return: {pnl_e} {mdcode(fmt_pct(pnl_pct, 2, signed=True))}",
         "",
         mditalic(f"Fees: {PAPER_FEE_PCT}% per side | Slippage: {PAPER_SLIPPAGE_PCT}%"),
+        "",
+        f"🔗 {mdbold('Real Wallet')} ({mdcode(SOLANA_NETWORK)})",
+        sol_line,
     ])
 
 
@@ -736,5 +744,108 @@ def text_help() -> str:
         "",
         mditalic("Tap Menu below or type any command."),
     ])
+
+
+def text_real_status(engine) -> str:
+    from .real_trading import real_stats, SOLANA_NETWORK, REAL_POSITION_SIZE_SOL
+    from .real_trading import REAL_STOP_LOSS_PCT, REAL_TAKE_PROFIT_PCT, REAL_TIME_STOP_SEC
+    from .real_trading import REAL_MIN_SCORE, REAL_MIN_PROB
+    s = real_stats()
+    return "\n".join([
+        f"⚡ {mdbold('Real Trading Status')}",
+        f"Enabled: {mdbold('YES ✅') if s['enabled'] else mdbold('NO ❌')}",
+        f"Network: {mdcode(SOLANA_NETWORK)}",
+        f"Open positions: {mdcode(s['open'])}",
+        f"Closed positions: {mdcode(s['closed'])}",
+        f"Avg P&L: {mdcode(fmt_pct(s['avg_pnl_pct'], 1, signed=True))}",
+        "",
+        mdbold("Config:"),
+        f"Size: {mdcode(f'{REAL_POSITION_SIZE_SOL} SOL')} per trade",
+        f"SL: {mdcode(f'{REAL_STOP_LOSS_PCT}%')} | "
+        f"TP: {mdcode(f'{REAL_TAKE_PROFIT_PCT}%')} | "
+        f"Time: {mdcode(fmt_duration(REAL_TIME_STOP_SEC))}",
+        f"Min score: {mdcode(REAL_MIN_SCORE)} | "
+        f"Min prob: {mdcode(fmt_prob(REAL_MIN_PROB))}",
+    ])
+
+
+def text_real_report() -> str:
+    from .real_trading import real_stats, get_open_real_trades, SOLANA_NETWORK
+    s = real_stats()
+    trades = get_open_real_trades()
+    lines = [
+        f"📑 {mdbold('Real Trading Report')}",
+        f"Network: {mdcode(SOLANA_NETWORK)} | "
+        f"Enabled: {'✅' if s['enabled'] else '❌'}",
+        "",
+        f"Open: {mdcode(s['open'])} | Closed: {mdcode(s['closed'])}",
+        f"Avg P&L: {mdcode(fmt_pct(s['avg_pnl_pct'], 1, signed=True))}",
+        "",
+        mdbold("Open Positions:"),
+    ]
+    if not trades:
+        lines.append(mditalic("None."))
+    else:
+        for t in trades:
+            mc = t.entry_mc * 1.1
+            pnl_pct = ((mc - t.entry_mc) / t.entry_mc * 100
+                       if t.entry_mc > 0 else 0)
+            e = "🟢" if pnl_pct > 0 else ("🔴" if pnl_pct < 0 else "⚪")
+            lines.append(
+                f"• {e} {mdbold(t.name or t.mint[:8])} "
+                f"{mdcode(fmt_pct(pnl_pct, 1, signed=True))} "
+                f"entry {mdcode(fmt_usd(t.entry_mc, 0))}"
+            )
+    return "\n".join(lines)
+
+
+def text_last_trade() -> str:
+    from .trading import get_open_trades
+    from .db import db_conn
+    from .config import PUMP_FRONT
+
+    with closing(db_conn()) as conn:
+        row = conn.execute(
+            "SELECT * FROM paper_trades ORDER BY entry_time DESC LIMIT 1"
+        ).fetchone()
+
+    if not row:
+        return "No trades yet."
+
+    from .utils import closing
+    name   = row["name"] or "Unknown"
+    symbol = row["symbol"] or "???"
+    mint   = row["mint"]
+    status = row["status"]
+    entry_mc  = float(row["entry_mc"])
+    pnl_pct  = float(row["pnl_pct"] or 0)
+    pnl_usd  = float(row["pnl_usd"] or 0)
+    reason   = row["reason"] or ""
+
+    if status == "OPEN":
+        return "\n".join([
+            f"⚡ {mdbold('MOST RECENT TRADE — OPEN')}",
+            f"{mdbold(name)} ({mdcode('$' + symbol)})",
+            "",
+            f"💰 Entry MC: {mdcode(fmt_usd(entry_mc, 0))}",
+            f"📊 Size: {mdcode(fmt_usd(float(row['position_size_usd']), 2))}",
+            f"🕐 Opened: {mdcode(fmt_duration(now_ts() - int(row['entry_time'])))} ago",
+            f"🪙 {mdcode(mint)}" if mint else "",
+            f"🔗 [Pump.fun]({PUMP_FRONT}/{mint})" if mint else "",
+        ])
+    else:
+        sign = "+" if pnl_pct >= 0 else ""
+        arrow = "📈" if pnl_pct >= 0 else "📉"
+        return "\n".join([
+            f"{arrow} {mdbold('MOST RECENT TRADE — CLOSED')}",
+            f"{mdbold(name)} ({mdcode('$' + symbol)})",
+            "",
+            f"{arrow} P&L: {mdcode(f'{sign}{pnl_pct:.1f}%')}  "
+            f"${mdcode(f'{pnl_usd:+.2f}')}",
+            f"📌 Reason: {mdcode(reason)}",
+            f"🕐 Closed: {mdcode(fmt_duration(now_ts() - int(row['exit_time'])))} ago",
+            f"🪙 {mdcode(mint)}" if mint else "",
+            f"🔗 [Pump.fun]({PUMP_FRONT}/{mint})" if mint else "",
+        ])
 
 
