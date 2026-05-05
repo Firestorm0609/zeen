@@ -6,7 +6,7 @@ from telegram.error import BadRequest, TelegramError
 from telegram.ext import ContextTypes
 
 from .config import (
-    ALLOWED_CHAT_IDS, DEFAULT_THRESHOLD, PAPER_STARTING_BALANCE_USD,
+    ALLOWED_CHAT_IDS, DEFAULT_THRESHOLD,
     ML_LABEL_WINDOW, PUMP_THRESHOLD_PCT, RUG_THRESHOLD_PCT,
 )
 from .db import set_state, upsert_chat
@@ -20,13 +20,13 @@ from .state import BotState
 from .ui_text import (
     format_top_performers, query_top_performers, text_features,
     text_keywords, text_market, text_model, text_monitor_status,
-    text_outcomes, text_paper_report, text_paper_status,
-    text_scoring_mode, text_snapshot, text_stats, text_wallet,
+    text_outcomes, text_scoring_mode, text_snapshot, text_stats, text_wallet,
     text_health, text_help, text_real_status, text_real_report,
     text_last_trade,
 )
 from .utils import mdbold, mdcode, strip_md2
 from .commands import do_train
+from .real_trading import real_engine, SOLANA_NETWORK
 
 log = logging.getLogger(__name__)
 PM = "MarkdownV2"
@@ -200,23 +200,6 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 pass
             await show(await do_train(engine))
 
-        elif data == "paper_on":
-            await state.set_paper_enabled(True)
-            set_state("paper_engine_enabled", "1")
-            state.paper_chats.add(cid)
-            upsert_chat(cid, paper_reports_enabled=1)
-            await show(f"✅ {mdbold('Paper trading ON')}")
-
-        elif data == "paper_off":
-            await state.set_paper_enabled(False)
-            set_state("paper_engine_enabled", "0")
-            state.paper_chats.discard(cid)
-            upsert_chat(cid, paper_reports_enabled=0)
-            await show(f"❌ {mdbold('Paper trading OFF')}")
-
-        elif data == "paper_status": await show(text_paper_status(state))
-        elif data == "paper_report": await show(text_paper_report(state))
-
         # ---------- More menu ----------
         elif data == "more":
             await show(
@@ -241,13 +224,6 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await show(f"❌ {mdbold('Real trading OFF')}")
         elif data == "real_status": await show(text_real_status(engine))
         elif data == "real_report": await show(text_real_report())
-        elif data == "wallet_reset":
-            PaperWallet.reset(PAPER_STARTING_BALANCE_USD)
-            await show(
-                f"✅ Wallet reset to {mdcode(fmt_usd(PAPER_STARTING_BALANCE_USD, 2))}\n"
-                f"{mditalic('Note: open positions remain — close them manually if needed.')}"
-            )
-
         else:
             try:
                 await query.answer("Unknown action", show_alert=True)
