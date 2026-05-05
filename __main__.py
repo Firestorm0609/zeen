@@ -26,6 +26,7 @@ from .commands import (
     cmd_last,
     cmd_real_on, cmd_real_off, cmd_real_status,
     cmd_real_balance, cmd_real_report,
+    cmd_trade_size, cmd_import_wallet,
 )
 from .keywords import KeywordModel
 from .lookback import lookback_loop, train_executor, training_loop
@@ -121,9 +122,11 @@ async def run() -> None:
         ("top",            cmd_top),
         ("real_on",        cmd_real_on),
         ("real_off",       cmd_real_off),
-        ("real_status",     cmd_real_status),
-        ("real_balance",    cmd_real_balance),
-        ("real_report",     cmd_real_report),
+        ("real_status",    cmd_real_status),
+        ("real_balance",   cmd_real_balance),
+        ("real_report",    cmd_real_report),
+        ("trade_size",     cmd_trade_size),
+        ("import_wallet",  cmd_import_wallet),
     ]
     for name, fn in handlers:
         app.add_handler(CommandHandler(name, fn))
