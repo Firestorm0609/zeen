@@ -9,10 +9,10 @@ from .config import (
     ALLOWED_CHAT_IDS, DEFAULT_THRESHOLD,
     ML_LABEL_WINDOW, PUMP_THRESHOLD_PCT, RUG_THRESHOLD_PCT,
 )
-from .db import set_state, upsert_chat
+from .db import set_state, upsert_chat, get_state
 from .keyboards import (
     MENU_HEADER, back_keyboard, main_menu_keyboard, threshold_keyboard,
-    more_keyboard,
+    more_keyboard, trade_size_keyboard, wallet_keyboard,
 )
 from .market import MarketContext
 from .scoring import ScoringEngine
@@ -26,7 +26,7 @@ from .ui_text import (
 )
 from .utils import mdbold, mdcode, strip_md2
 from .commands import do_train
-from .real_trading import real_engine, SOLANA_NETWORK
+from .real_trading import real_engine, SOLANA_NETWORK, REAL_POSITION_SIZE_SOL
 
 log = logging.getLogger(__name__)
 PM = "MarkdownV2"
@@ -224,6 +224,89 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await show(f"❌ {mdbold('Real trading OFF')}")
         elif data == "real_status": await show(text_real_status(engine))
         elif data == "real_report": await show(text_real_report())
+        elif data == "trade_size_menu":
+            current = float(get_state("real_position_size_sol") or REAL_POSITION_SIZE_SOL)
+            await show(
+                f"💱 {mdbold('Trade Size')}\n"
+                f"Current: {mdcode(f'{current} SOL')} per trade\n"
+                f"Choose a preset or use {mdcode('/trade_size 0.3')} for custom:",
+                kb=trade_size_keyboard(current),
+            )
+
+        elif data.startswith("set_size_"):
+            try:
+                val = float(data.split("set_size_")[1])
+            except ValueError:
+                await show("❌ Invalid size")
+                return
+            if not 0.01 <= val <= 10.0:
+                await show("❌ Must be between 0.01 and 10.0 SOL")
+                return
+            set_state("real_position_size_sol", str(val))
+            await show(
+                f"✅ Trade size set to {mdcode(f'{val} SOL')} per trade",
+                kb=trade_size_keyboard(val),
+            )
+
+        elif data == "size_custom_hint":
+            await show(
+                f"✏️ {mdbold('Custom Trade Size')}\n\n"
+                f"Use the command: {mdcode('/trade_size 0.3')}\n"
+                f"Min: {mdcode('0.01 SOL')} | Max: {mdcode('10.0 SOL')}",
+            )
+
+        elif data == "wallet_menu":
+            await show(
+                f"👛 {mdbold('Wallet Management')}\n\n"
+                f"Network: {mdcode(SOLANA_NETWORK.upper())}",
+                kb=wallet_keyboard(),
+            )
+
+        elif data == "wallet_address":
+            from .real_trading import _load_wallet
+            wallet = _load_wallet()
+            address = wallet["pubkey"] if wallet else "not loaded"
+            await show(
+                f"📋 {mdbold('Wallet Address')}\n\n"
+                f"{mdcode(address)}\n\n"
+                f"Network: {mdcode(SOLANA_NETWORK.upper())}",
+                kb=wallet_keyboard(),
+            )
+
+        elif data == "wallet_export_key":
+            if update.effective_chat.type != "private":
+                await show(
+                    f"⚠️ {mdbold('Private chats only')}\n\n"
+                    f"Use {mdcode('/export_wallet')} in a private chat with the bot for security\\.",
+                    kb=wallet_keyboard(),
+                )
+            else:
+                from .real_trading import _load_wallet
+                import json as _json
+                wallet = _load_wallet()
+                if not wallet or wallet.get("simulated"):
+                    await show("❌ No wallet loaded\\.", kb=wallet_keyboard())
+                else:
+                    key_json = _json.dumps(list(wallet["secret"]))
+                    await show(
+                        f"🔑 {mdbold('Private Key — keep secret\\!')}\n\n"
+                        f"JSON array \\(for wallet\\.json\\):\n"
+                        f"{mdcode(key_json)}\n\n"
+                        f"⚠️ {mditalic('Delete this message after saving\\. Anyone with this key controls your funds\\.')}",
+                        kb=wallet_keyboard(),
+                    )
+
+        elif data == "wallet_import_hint":
+            await show(
+                f"📥 {mdbold('Import Wallet')}\n\n"
+                f"Send the command:\n"
+                f"{mdcode('/import_wallet <private_key>')}\n\n"
+                f"Accepts:\n"
+                f"• Base58 encoded private key\n"
+                f"• 64\\-byte JSON array\n\n"
+                f"⚠️ {mditalic('Use in private chat only\\. Bot deletes your message immediately\\.  Stop trading first\\.')}",
+            )
+
         else:
             try:
                 await query.answer("Unknown action", show_alert=True)
