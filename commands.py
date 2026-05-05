@@ -34,6 +34,11 @@ from .utils import (
     mdbold, mdcode, mditalic, now_ts, safe_float, safe_int, strip_md2,
 )
 from .wallet import PaperWallet
+from .real_trading import (
+    real_engine, real_stats, swap_sol_for_token, get_wallet_sol_balance,
+    get_open_real_trades, SOLANA_NETWORK, REAL_POSITION_SIZE_SOL,
+    REAL_STOP_LOSS_PCT, REAL_TAKE_PROFIT_PCT, REAL_TIME_STOP_SEC,
+)
 
 log = logging.getLogger(__name__)
 
@@ -588,5 +593,92 @@ async def cmd_top(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         days = max(1, min(30, int(ctx.args[0])))
     rows = query_top_performers(days=days)
     await _reply(update, format_top_performers(rows, days))
+
+
+# ---------- Real Trading ----------
+
+async def cmd_real_on(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await _check_allowed(update): return
+    if not real_engine.enabled:
+        await real_engine.set_enabled(True)
+        set_state("real_trading_enabled", "1")
+        await _reply(update,
+            f"✅ {mdbold('Real trading ON')} — network: {mdcode(SOLANA_NETWORK)}")
+    else:
+        await _reply(update, "Real trading is already ON.")
+
+
+async def cmd_real_off(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await _check_allowed(update): return
+    await real_engine.set_enabled(False)
+    set_state("real_trading_enabled", "0")
+    await _reply(update, f"❌ {mdbold('Real trading OFF')}")
+
+
+async def cmd_real_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await _check_allowed(update): return
+    s = real_stats()
+    lines = [
+        f"⚡ {mdbold('Real Trading Status')}",
+        f"Enabled: {mdbold('YES ✅') if s['enabled'] else mdbold('NO ❌')}",
+        f"Network: {mdcode(SOLANA_NETWORK)}",
+        f"Open positions: {mdcode(s['open'])}",
+        f"Closed positions: {mdcode(s['closed'])}",
+        f"Avg P&L: {mdcode(fmt_pct(s['avg_pnl_pct'], 1, signed=True))}",
+        "",
+        mdbold("Config:"),
+        f"Size: {mdcode(f'{REAL_POSITION_SIZE_SOL} SOL')} per trade",
+        f"SL: {mdcode(f'{REAL_STOP_LOSS_PCT}%')} | "
+        f"TP: {mdcode(f'{REAL_TAKE_PROFIT_PCT}%')} | "
+        f"Time: {mdcode(fmt_duration(REAL_TIME_STOP_SEC))}",
+        f"Min score: {mdcode(REAL_MIN_SCORE)} | "
+        f"Min prob: {mdcode(fmt_prob(REAL_MIN_PROB))}",
+    ]
+    await _reply(update, "\n".join(lines))
+
+
+async def cmd_real_balance(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await _check_allowed(update): return
+    bal = await get_wallet_sol_balance()
+    lines = [
+        f"💰 {mdbold('Wallet Balance')}",
+        f"Network: {mdcode(SOLANA_NETWORK)}",
+        f"SOL Balance: {mdcode(fmt_usd(bal * 180, 2))} "
+        f"({mdcode(f'{bal:.4f} SOL')})",
+        "",
+        mditalic(f"Wallet file: {SOLANA_WALLET_PATH}"),
+    ]
+    await _reply(update, "\n".join(lines))
+
+
+async def cmd_real_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await _check_allowed(update): return
+    s = real_stats()
+    trades = get_open_real_trades()
+
+    lines = [
+        f"📑 {mdbold('Real Trading Report')}",
+        f"Network: {mdcode(SOLANA_NETWORK)} | "
+        f"Enabled: {'✅' if s['enabled'] else '❌'}",
+        "",
+        f"Open: {mdcode(s['open'])} | Closed: {mdcode(s['closed'])}",
+        f"Avg P&L: {mdcode(fmt_pct(s['avg_pnl_pct'], 1, signed=True))}",
+        "",
+        mdbold("Open Positions:"),
+    ]
+    if not trades:
+        lines.append(mditalic("None."))
+    else:
+        for t in trades:
+            mc = (t.entry_mc * 1.1)  # approximate current
+            pnl_pct = ((mc - t.entry_mc) / t.entry_mc * 100
+                       if t.entry_mc > 0 else 0)
+            e = "🟢" if pnl_pct > 0 else ("🔴" if pnl_pct < 0 else "⚪")
+            lines.append(
+                f"• {e} {mdbold(t.name or t.mint[:8])} "
+                f"{mdcode(fmt_pct(pnl_pct, 1, signed=True))} "
+                f"entry {mdcode(fmt_usd(t.entry_mc, 0))}"
+            )
+    await _reply(update, "\n".join(lines))
 
 

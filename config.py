@@ -141,6 +141,40 @@ RPC_TIMEOUT_SEC       = _int("RPC_TIMEOUT_SEC", 8)
 RPC_RATE_PER_SEC      = _float("RPC_RATE_PER_SEC", 3.0)
 BUNDLE_SLOT_THRESHOLD = _int("BUNDLE_SLOT_THRESHOLD", 3)
 
+# ---------- Real Trading ----------
+REAL_TRADING_ENABLED    = _bool("REAL_TRADING_ENABLED", False)
+SOLANA_NETWORK         = os.getenv("SOLANA_NETWORK", "devnet")  # "devnet" or "mainnet"
+
+# Wallet (keypair JSON file for devnet, can be swapped to mainnet wallet later)
+SOLANA_WALLET_PATH    = os.getenv("SOLANA_WALLET_PATH", "wallet.json")
+
+# Network-specific RPC endpoints (override SOLANA_RPC_URL when trading)
+DEVNET_RPC_URL        = os.getenv("DEVNET_RPC_URL", "https://api.devnet.solana.com")
+MAINNET_RPC_URL       = os.getenv("MAINNET_RPC_URL", "https://api.mainnet-beta.solana.com")
+
+# Position sizing for real trades
+REAL_POSITION_SIZE_SOL = _float("REAL_POSITION_SIZE_SOL", 0.1)  # SOL per trade
+REAL_MAX_CONCURRENT    = _int("REAL_MAX_CONCURRENT", 3)
+REAL_MINT_COOLDOWN_SEC = _int("REAL_MINT_COOLDOWN_SEC", 30 * 60)
+
+# Exit params (same logic as paper, applied to real trades)
+REAL_STOP_LOSS_PCT     = _float("REAL_STOP_LOSS_PCT", 20.0)
+REAL_TAKE_PROFIT_PCT   = _float("REAL_TAKE_PROFIT_PCT", 35.0)
+REAL_TIME_STOP_SEC     = _int("REAL_TIME_STOP_SEC", 4 * 60 * 60)
+REAL_SLIPPAGE_PCT      = _float("REAL_SLIPPAGE_PCT", 5.0)  # Higher slippage for real trades
+REAL_FEE_PCT           = _float("REAL_FEE_PCT", 1.0)
+
+# Safety gates
+REAL_MIN_SCORE         = _int("REAL_MIN_SCORE", 8)
+REAL_MIN_PROB          = _float("REAL_MIN_PROB", 0.75)
+REAL_CONFIDENCE_GATE_STD = _float("REAL_CONFIDENCE_GATE_STD", 0.05)
+REAL_MAX_POSITION_PCT   = _float("REAL_MAX_POSITION_PCT", 10.0)  # Max % of wallet per trade
+REAL_DAILY_LOSS_LIMIT_PCT = _float("REAL_DAILY_LOSS_LIMIT_PCT", 20.0)
+REAL_LOSS_STREAK_PAUSE = _int("REAL_LOSS_STREAK_PAUSE", 3)
+
+# PumpSwap / Jupiter integration
+PUMPSWAP_API_URL     = os.getenv("PUMPSWAP_API_URL", "https://pumpportal.fun/api/swap")
+
 # Confidence gating
 CONFIDENCE_GATE_STD = _float("CONFIDENCE_GATE_STD", 0.08)
 

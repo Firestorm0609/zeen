@@ -18,6 +18,7 @@ from .trading import (
     maybe_close_paper_trades_for_coin, maybe_open_paper_trade,
     record_creator_token,
 )
+from .real_trading import maybe_open_real_trade
 from .utils import safe_float, safe_int
 
 log = logging.getLogger(__name__)
@@ -98,6 +99,7 @@ async def process_coin(coin: dict, bot: Bot, engine: ScoringEngine,
                 await loop.run_in_executor(None, record_creator_token, creator, mint)
 
             await loop.run_in_executor(None, maybe_open_paper_trade, state, coin, result, market_ctx, bot)
+            await loop.run_in_executor(None, maybe_open_real_trade, state, coin, result, market_ctx, bot)
             await send_alert(bot, coin, result, state)
 
             await state.mark_seen(mint)
