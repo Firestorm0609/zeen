@@ -1,3 +1,4 @@
+from typing import Optional
 #!/usr/bin/env python3
 """Devnet wallet setup helper for zeen real trading.
 
@@ -217,21 +218,21 @@ def main():
     bal = check_balance(pubkey)
     log.info("Current balance: %.4f SOL", bal)
 
-    if bal >= Airdrop_AMOUNT:
+    if bal >= AIRDROP_AMOUNT:
         log.info("Balance sufficient, skipping airdrop.")
     else:
-        log.info("Requesting %d SOL airdrop on devnet...", Airdrop_AMOUNT)
-        ok = airdrop_via_rpc(pubkey, Airdrop_AMOUNT)
+        log.info("Requesting %d SOL airdrop on devnet...", AIRDROP_AMOUNT)
+        ok = airdrop_via_rpc(pubkey, AIRDROP_AMOUNT)
         if not ok:
             log.info("RPC airdrop failed, trying CLI...")
-            ok = airdrop_via_cli(pubkey, Airdrop_AMOUNT)
+            ok = airdrop_via_cli(pubkey, AIRDROP_AMOUNT)
         if ok:
             time.sleep(3)
             new_bal = check_balance(pubkey)
             log.info("New balance: %.4f SOL", new_bal)
         else:
             log.warning("Airdrop failed. You can manually run:")
-            log.warning("  solana airdrop %d %s --url devnet", Airdrop_AMOUNT, pubkey)
+            log.warning("  solana airdrop %d %s --url devnet", AIRDROP_AMOUNT, pubkey)
 
     # Update .env
     update_env(pubkey)

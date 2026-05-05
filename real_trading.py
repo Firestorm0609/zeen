@@ -23,7 +23,7 @@ import base58
 from .config import (
     DEVNET_RPC_URL, MAINNET_RPC_URL, PUMP_FRONT,
     REAL_CONFIDENCE_GATE_STD, REAL_DAILY_LOSS_LIMIT_PCT,
-    REAL_ENABLED, REAL_MAX_CONCURRENT, REAL_MAX_POSITION_PCT,
+    REAL_TRADING_ENABLED, REAL_MAX_CONCURRENT, REAL_MAX_POSITION_PCT,
     REAL_FEE_PCT, REAL_LOSS_STREAK_PAUSE, REAL_MINT_COOLDOWN_SEC,
     REAL_MIN_SCORE, REAL_MIN_PROB,
     REAL_POSITION_SIZE_SOL, REAL_SLIPPAGE_PCT,
@@ -323,7 +323,7 @@ class RealTradingEngine:
         return self._enabled
 
     def check_entry(self, state: BotState, coin: dict, result: dict) -> tuple[bool, str]:
-        if not self._enabled or not REAL_ENABLED:
+        if not self._enabled or not REAL_TRADING_ENABLED:
             return False, "real trading disabled"
 
         score = safe_int(result.get("score", 0))
