@@ -25,6 +25,8 @@ from .commands import (
     cmd_stats, cmd_top, cmd_train, cmd_unwatch, cmd_wallet,
     cmd_wallet_reset, cmd_watch, cmd_watchlist,
     cmd_last, cmd_paper_reports_on, cmd_paper_reports_off,
+    cmd_real_on, cmd_real_off, cmd_real_status,
+    cmd_real_balance, cmd_real_report,
 )
 from .keywords import KeywordModel
 from .lookback import lookback_loop, train_executor, training_loop
@@ -34,6 +36,10 @@ from .scoring import ScoringEngine
 from .state import BotState
 from .stream import get_active_tasks, stream
 from .trading import paper_monitor_loop
+from .real_trading import (
+    init_real_trades_db, real_engine, real_monitor_loop,
+    maybe_open_real_trade,
+)
 from .utils import now_ts
 
 
@@ -82,10 +88,16 @@ async def run() -> None:
     state = BotState(paper_enabled=paper_init)
     state.load()
 
+    # Real trading init
+    init_real_trades_db()
+    real_enabled = get_state("real_trading_enabled", "0") == "1"
+    await real_engine.set_enabled(real_enabled)
+
     app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.bot_data["engine"]     = engine
-    app.bot_data["market_ctx"] = market_ctx
-    app.bot_data["state"]      = state
+    app.bot_data["engine"]        = engine
+    app.bot_data["market_ctx"]    = market_ctx
+    app.bot_data["state"]         = state
+    app.bot_data["real_engine"]   = real_engine
 
     handlers = [
         ("start",          cmd_start),
@@ -121,6 +133,11 @@ async def run() -> None:
         ("wallet_reset",   cmd_wallet_reset),
         ("blacklist",      cmd_blacklist),
         ("top",            cmd_top),
+        ("real_on",        cmd_real_on),
+        ("real_off",       cmd_real_off),
+        ("real_status",     cmd_real_status),
+        ("real_balance",    cmd_real_balance),
+        ("real_report",     cmd_real_report),
     ]
     for name, fn in handlers:
         app.add_handler(CommandHandler(name, fn))
@@ -153,6 +170,8 @@ async def run() -> None:
                 outcome_notify_loop(app.bot, state),     name="outcome_notify"),
             asyncio.create_task(
                 watchlist_monitor_loop(app.bot),         name="watchlist_monitor"),
+            asyncio.create_task(
+                real_monitor_loop(app.bot),            name="real_monitor"),
             # blacklist_refresh_loop removed: BlacklistCache already auto-refreshes
             # via its internal TTL on every lookup — a separate loop was redundant.
         ]
