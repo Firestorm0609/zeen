@@ -610,7 +610,7 @@ async def cmd_import_wallet(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"📥 {mdbold('Import Wallet')}\n\n"
             f"Usage: {mdcode('/import_wallet <private_key>')}\n"
             f"Accepts base58 or 64\\-byte JSON array\\.\n\n"
-            f"⚠️ {mditalic('Use in private chat only\\.')}"
+            "⚠️ " + mditalic('Use in private chat only\\.')
         )
         return
 
