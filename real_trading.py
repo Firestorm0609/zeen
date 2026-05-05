@@ -382,7 +382,9 @@ class RealTradingEngine:
         tp = max(REAL_TAKE_PROFIT_PCT * 0.5, min(REAL_TAKE_PROFIT_PCT * 2.5, tp))
         time_sec = max(300, min(4 * 3600, time_sec))
 
-        size_sol = REAL_POSITION_SIZE_SOL
+        from .db import get_state
+        _size_str = get_state("real_position_size_sol", "")
+        size_sol = float(_size_str) if _size_str else REAL_POSITION_SIZE_SOL
         wallet = _load_wallet()
         if not wallet:
             log.error("Cannot open real trade: wallet load failed")
