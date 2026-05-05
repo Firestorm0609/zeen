@@ -288,15 +288,18 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     await show("❌ No wallet loaded\\.", kb=wallet_keyboard())
                 else:
                     key_json = _json.dumps(list(wallet["secret"]))
+                    _header = mdbold('Private Key — keep secret\\!')
+                    _warning = mditalic('Delete this message after saving\\. Anyone with this key controls your funds\\.')
                     await show(
-                        f"🔑 {mdbold('Private Key — keep secret\\!')}\n\n"
+                        f"🔑 {_header}\n\n"
                         f"JSON array \\(for wallet\\.json\\):\n"
                         f"{mdcode(key_json)}\n\n"
-                        f"⚠️ {mditalic('Delete this message after saving\\. Anyone with this key controls your funds\\.')}",
+                        f"⚠️ {_warning}",
                         kb=wallet_keyboard(),
                     )
 
         elif data == "wallet_import_hint":
+            _warning = mditalic('Use in private chat only\\. Bot deletes your message immediately\\. Stop trading first\\.')
             await show(
                 f"📥 {mdbold('Import Wallet')}\n\n"
                 f"Send the command:\n"
@@ -304,7 +307,7 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 f"Accepts:\n"
                 f"• Base58 encoded private key\n"
                 f"• 64\\-byte JSON array\n\n"
-                f"⚠️ {mditalic('Use in private chat only\\. Bot deletes your message immediately\\.  Stop trading first\\.')}",
+                f"⚠️ {_warning}",
             )
 
         else:
