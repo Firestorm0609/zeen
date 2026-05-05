@@ -752,10 +752,10 @@ def text_real_report() -> str:
     trades = get_open_real_trades()
     lines = [
         f"📑 {mdbold('Real Trading Report')}",
-        f"Network: {mdcode(SOLANA_NETWORK)} | "
+        f"Network: {mdcode(SOLANA_NETWORK)} \\| "
         f"Enabled: {'✅' if s['enabled'] else '❌'}",
         "",
-        f"Open: {mdcode(s['open_positions'])} | Closed: {mdcode(s['closed_positions'])}",
+        f"Open: {mdcode(s['open_positions'])} \| Closed: {mdcode(s['closed_positions'])}",
         f"Avg P&L: {mdcode(fmt_pct(s['avg_pnl_pct'], 1, signed=True))}",
         "",
         mdbold("Open Positions:"),

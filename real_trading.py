@@ -38,7 +38,7 @@ from .utils import now_ts, safe_float, safe_int
 
 log = logging.getLogger(__name__)
 
-SOL_MINT = "So11111111111111111111111111111111111112"
+SOL_MINT = "So11111111111111111111111111111111111111112"
 
 
 # ---------- Wallet ----------
@@ -110,7 +110,8 @@ async def _jupiter_quote(
     try:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
             if resp.status != 200:
-                log.warning("Jupiter quote HTTP %s", resp.status)
+                body = await resp.text()
+                log.warning("Jupiter quote HTTP %s | body: %s", resp.status, body[:300])
                 return None
             return await resp.json()
     except Exception as e:
