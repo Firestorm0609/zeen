@@ -142,7 +142,7 @@ RPC_RATE_PER_SEC      = _float("RPC_RATE_PER_SEC", 3.0)
 BUNDLE_SLOT_THRESHOLD = _int("BUNDLE_SLOT_THRESHOLD", 3)
 
 # ---------- Real Trading ----------
-REAL_TRADING_ENABLED    = _bool("REAL_TRADING_ENABLED", False)
+REAL_TRADING_ENABLED    = _bool("REAL_TRADING_ENABLED", True)
 SOLANA_NETWORK         = os.getenv("SOLANA_NETWORK", "devnet")  # "devnet" or "mainnet"
 
 # Wallet (keypair JSON file for devnet, can be swapped to mainnet wallet later)

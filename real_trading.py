@@ -370,8 +370,8 @@ class RealTradingEngine:
 
     async def open_trade(
         self, coin: dict, result: dict,
-        market_ctx=None, bot=None,
-    ) -> Optional[RealTrade]:
+        market_ctx=None, bot=None, state=None,
+    ) -> "Optional[RealTrade]":
         mint = coin.get("mint", "")
         name = coin.get("name", "")
         symbol = coin.get("symbol", "")
@@ -434,22 +434,23 @@ class RealTradingEngine:
             dynamic_time_stop=time_sec,
         )
 
-        if bot:
+        if bot and state:
             try:
-                from telegram.ext.helpers import escape_markdown
+                from telegram.helpers import escape_markdown
                 text = (
-                    f"⚠️ {escape_markdown('REAL TRADE OPENED', 2)}"
-                    f"\n{name or mint[:8]}"
-                    f"\nSize: {size_sol} SOL on {SOLANA_NETWORK}"
+                    f"⚡ *REAL TRADE OPENED* — {SOLANA_NETWORK.upper()}\n"
+                    f"🪙 {escape_markdown(name or mint[:8], version=2)}\n"
+                    f"Size: `{size_sol} SOL`\n"
+                    f"SL: `{sl:.1f}%` | TP: `{tp:.1f}%` | Time: `{time_sec}s`"
                 )
-                for cid in list(state.alerts.keys()) if state.alerts else []:
+                for cid in list(state.alerts.keys()):
                     try:
                         await bot.send_message(
                             chat_id=cid, text=text, parse_mode="MarkdownV2")
                     except Exception:
                         pass
             except Exception as e:
-                log.debug("real trade notify: %s", e)
+                log.debug("real trade open notify: %s", e)
 
         return trade
 
@@ -460,12 +461,12 @@ real_engine = RealTradingEngine()
 
 
 async def maybe_open_real_trade(
-    state: BotState, coin: dict, result: dict,
+    state: "BotState", coin: dict, result: dict,
     market_ctx=None, bot=None,
 ) -> None:
     ok, reason = real_engine.check_entry(state, coin, result)
     if ok:
-        await real_engine.open_trade(coin, result, market_ctx, bot)
+        await real_engine.open_trade(coin, result, market_ctx, bot, state)
     else:
         log.debug("REAL SKIP | %s | %s", (coin.get("mint") or "?")[:8], reason)
 
@@ -557,6 +558,34 @@ async def real_monitor_loop(bot=None) -> None:
                         log.info("REAL CLOSE | %s | %s | %+.1f%% (%+.3f SOL)",
                                  t.name or t.mint[:8], reason, pnl_pct, pnl_sol)
 
+                        if bot:
+                            try:
+                                from .state import BotState  # avoid circular at module level
+                                from telegram.helpers import escape_markdown
+                                emoji = "🟢" if pnl_pct > 0 else "🔴"
+                                text = (
+                                    f"{emoji} *TRADE CLOSED* — {SOLANA_NETWORK.upper()}\n"
+                                    f"🪙 {escape_markdown(t.name or t.mint[:8], version=2)}\n"
+                                    f"Reason: `{escape_markdown(reason, version=2)}`\n"
+                                    f"P&L: `{pnl_pct:+.1f}%` \\(`{pnl_sol:+.4f} SOL`\\)"
+                                )
+                                # Pull alert chat IDs from app bot_data if available
+                                app = getattr(bot, "_application", None)
+                                alert_chats: list[int] = []
+                                if app and hasattr(app, "bot_data"):
+                                    st = app.bot_data.get("state")
+                                    if st:
+                                        alert_chats = list(st.alerts.keys())
+                                for cid in alert_chats:
+                                    try:
+                                        await bot.send_message(
+                                            chat_id=cid, text=text,
+                                            parse_mode="MarkdownV2")
+                                    except Exception:
+                                        pass
+                            except Exception as e:
+                                log.debug("real close notify: %s", e)
+
         except Exception as e:
             log.error("real_monitor_loop: %s", e)
         await asyncio.sleep(60)
@@ -565,16 +594,39 @@ async def real_monitor_loop(bot=None) -> None:
 def real_stats() -> dict:
     with closing(db_conn()) as conn:
         closed = conn.execute(
-            "SELECT COUNT(*) AS c, AVG(pnl_pct) AS avg FROM real_trades "
-            "WHERE status='CLOSED'"
-        ).fetchone()
+            "SELECT pnl_pct, pnl_sol FROM real_trades WHERE status='CLOSED' "
+            "ORDER BY exit_time DESC LIMIT 1000"
+        ).fetchall()
         open_n = conn.execute(
             "SELECT COUNT(*) AS c FROM real_trades WHERE status='OPEN'"
         ).fetchone()["c"]
+
+    n = len(closed)
+    wins   = sum(1 for r in closed if safe_float(r["pnl_pct"]) > 0)
+    losses = n - wins
+    total_sol = sum(safe_float(r["pnl_sol"]) for r in closed)
+    avg_pct   = sum(safe_float(r["pnl_pct"]) for r in closed) / n if n else 0.0
+    best      = max((safe_float(r["pnl_pct"]) for r in closed), default=0.0)
+    worst     = min((safe_float(r["pnl_pct"]) for r in closed), default=0.0)
+
+    # Max drawdown (cumulative SOL equity curve)
+    equity = peak = max_dd = 0.0
+    for r in reversed(closed):
+        equity += safe_float(r["pnl_sol"])
+        peak    = max(peak, equity)
+        max_dd  = max(max_dd, peak - equity)
+
     return {
-        "enabled": real_engine.enabled,
-        "network": SOLANA_NETWORK,
-        "open": open_n,
-        "closed": closed["c"] or 0,
-        "avg_pnl_pct": closed["avg"] or 0.0,
+        "enabled":          real_engine.enabled,
+        "network":          SOLANA_NETWORK,
+        "open_positions":   int(open_n),
+        "closed_positions": n,
+        "wins":             wins,
+        "losses":           losses,
+        "win_rate":         wins / n * 100 if n else 0.0,
+        "total_pnl_sol":    total_sol,
+        "avg_pnl_pct":      avg_pct,
+        "best_pnl_pct":     best,
+        "worst_pnl_pct":    worst,
+        "max_drawdown_sol": max_dd,
     }

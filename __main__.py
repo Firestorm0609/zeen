@@ -12,19 +12,18 @@ from .background import (
     db_backup_loop, dead_letter_retry_loop,
     outcome_notify_loop, stream_watchdog_loop, watchlist_monitor_loop,
 )
-from .config import BOT_TOKEN, LOG_PATH, MODEL_VERSION, PAPER_ENABLED_DEFAULT
+from .config import BOT_TOKEN, LOG_PATH, MODEL_VERSION
 from .db import get_state, init_db, set_state
 from .features import FEATURES
 from .callbacks import handle_callback
 from .commands import (
     cmd_backtest, cmd_blacklist, cmd_features, cmd_health, cmd_help,
     cmd_keywords, cmd_market, cmd_menu, cmd_model, cmd_monitor_off,
-    cmd_monitor_on, cmd_monitor_status, cmd_outcomes, cmd_paper_off,
-    cmd_paper_on, cmd_paper_report, cmd_paper_status, cmd_score,
+    cmd_monitor_on, cmd_monitor_status, cmd_outcomes,
+    cmd_score,
     cmd_scoring_mode, cmd_set_threshold, cmd_snapshot, cmd_start,
-    cmd_stats, cmd_top, cmd_train, cmd_unwatch, cmd_wallet,
-    cmd_wallet_reset, cmd_watch, cmd_watchlist,
-    cmd_last, cmd_paper_reports_on, cmd_paper_reports_off,
+    cmd_stats, cmd_top, cmd_train, cmd_unwatch, cmd_watch, cmd_watchlist,
+    cmd_last,
     cmd_real_on, cmd_real_off, cmd_real_status,
     cmd_real_balance, cmd_real_report,
 )
@@ -35,7 +34,6 @@ from .processor import init_semaphore
 from .scoring import ScoringEngine
 from .state import BotState
 from .stream import get_active_tasks, stream
-from .trading import paper_monitor_loop
 from .real_trading import (
     init_real_trades_db, real_engine, real_monitor_loop,
     maybe_open_real_trade,
@@ -81,16 +79,12 @@ async def run() -> None:
     keyword_model.learn_from_db()
     set_state("bot_started_at", str(now_ts()))
 
-    paper_init = get_state(
-        "paper_engine_enabled",
-        "1" if PAPER_ENABLED_DEFAULT else "0",
-    ) == "1"
-    state = BotState(paper_enabled=paper_init)
+    state = BotState()
     state.load()
 
     # Real trading init
     init_real_trades_db()
-    real_enabled = get_state("real_trading_enabled", "0") == "1"
+    real_enabled = get_state("real_trading_enabled", "1") == "1"
     await real_engine.set_enabled(real_enabled)
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
@@ -115,12 +109,6 @@ async def run() -> None:
         ("model",          cmd_model),
         ("train",          cmd_train),
         ("snapshot",       cmd_snapshot),
-        ("paper_on",       cmd_paper_on),
-        ("paper_off",      cmd_paper_off),
-        ("paper_status",   cmd_paper_status),
-        ("paper_report",   cmd_paper_report),
-        ("paper_reports_on", cmd_paper_reports_on),
-        ("paper_reports_off", cmd_paper_reports_off),
         ("health",         cmd_health),
         ("score",          cmd_score),
         ("backtest",       cmd_backtest),
@@ -129,8 +117,6 @@ async def run() -> None:
         ("watchlist",      cmd_watchlist),
         ("stats",          cmd_stats),
         ("last",           cmd_last),
-        ("wallet",         cmd_wallet),
-        ("wallet_reset",   cmd_wallet_reset),
         ("blacklist",      cmd_blacklist),
         ("top",            cmd_top),
         ("real_on",        cmd_real_on),
@@ -150,8 +136,10 @@ async def run() -> None:
         await app.start()
         await app.updater.start_polling(drop_pending_updates=True)
         log.info(
-            "Bot running v%s | paper=%s | scoring=%s | features=%d",
-            MODEL_VERSION, state.paper_enabled, engine.mode_label, len(FEATURES),
+            "Bot running v%s | trading=%s (%s) | scoring=%s | features=%d",
+            MODEL_VERSION, real_engine.enabled,
+            __import__("zeen.config", fromlist=["SOLANA_NETWORK"]).SOLANA_NETWORK,
+            engine.mode_label, len(FEATURES),
         )
 
         background_tasks = [
@@ -159,7 +147,6 @@ async def run() -> None:
                 stream(app.bot, engine, market_ctx, state), name="stream"),
             asyncio.create_task(lookback_loop(),         name="lookback"),
             asyncio.create_task(training_loop(engine),   name="training"),
-            asyncio.create_task(paper_monitor_loop(app.bot), name="paper_monitor"),
             asyncio.create_task(
                 stream_watchdog_loop(app.bot, state),    name="stream_watchdog"),
             asyncio.create_task(

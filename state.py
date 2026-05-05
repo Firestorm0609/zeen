@@ -16,14 +16,11 @@ log = logging.getLogger(__name__)
 
 
 class BotState:
-    def __init__(self, paper_enabled: bool = False):
+    def __init__(self):
         self._seen: "OrderedDict[str, float]" = OrderedDict()
         self._seen_lock = asyncio.Lock()
         self._last_prune = 0.0
         self.alerts: dict[int, int] = {}
-        self.paper_chats: set[int] = set()
-        self._paper_on = paper_enabled
-        self._pe_lock = asyncio.Lock()
         self.last_coin_ts = time.time()
         # Use a single float for stream-dead state: 0.0 = not alerted,
         # >0 = unix timestamp when the alert was sent.
@@ -50,14 +47,6 @@ class BotState:
     @stream_dead_alert_at.setter
     def stream_dead_alert_at(self, value: float) -> None:
         self._stream_dead_alerted_at = value
-
-    @property
-    def paper_enabled(self) -> bool:
-        return self._paper_on
-
-    async def set_paper_enabled(self, val: bool) -> None:
-        async with self._pe_lock:
-            self._paper_on = val
 
     async def seen_recently(self, mint: str) -> bool:
         async with self._seen_lock:
@@ -101,14 +90,11 @@ class BotState:
 
     def load(self) -> None:
         self.alerts.clear()
-        self.paper_chats.clear()
         with closing(db_conn()) as conn:
             for r in conn.execute("SELECT * FROM chat_settings").fetchall():
                 cid = int(r["chat_id"])
                 if int(r["alerts_enabled"]) == 1:
                     self.alerts[cid] = int(r["threshold"])
-                if int(r["paper_reports_enabled"]) == 1:
-                    self.paper_chats.add(cid)
 
 
 class BlacklistCache:

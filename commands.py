@@ -13,7 +13,7 @@ from telegram.ext import ContextTypes
 from .alerts import build_keyboard, build_message
 from .config import (
     DEFAULT_THRESHOLD, HTTP_TIMEOUT_SEC, MIN_TRAIN_SAMPLES, ML_AVAILABLE,
-    ML_LABEL_WINDOW, PAPER_STARTING_BALANCE_USD, PUMP_THRESHOLD_PCT,
+    ML_LABEL_WINDOW, PUMP_THRESHOLD_PCT,
     RUG_THRESHOLD_PCT,
 )
 from .db import db_conn, db_write, set_state, upsert_chat
@@ -25,15 +25,14 @@ from .state import BotState, blacklist_cache
 from .ui_text import (
     format_top_performers, query_top_performers, text_features,
     text_health, text_help, text_keywords, text_market, text_model,
-    text_monitor_status, text_outcomes, text_paper_report,
-    text_paper_status, text_scoring_mode, text_snapshot, text_stats,
-    text_wallet,
+    text_monitor_status, text_outcomes,
+    text_scoring_mode, text_snapshot, text_stats,
+    text_trading_report, text_trading_status, text_wallet,
 )
 from .utils import (
     fmt_duration, fmt_pct, fmt_prob, fmt_usd,
     mdbold, mdcode, mditalic, now_ts, safe_float, safe_int, strip_md2,
 )
-from .wallet import PaperWallet
 from .real_trading import (
     real_engine, real_stats, swap_sol_for_token, get_wallet_sol_balance,
     get_open_real_trades, SOLANA_NETWORK, REAL_POSITION_SIZE_SOL,
@@ -214,100 +213,49 @@ async def cmd_snapshot(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await _reply(update, text_snapshot())
 
 
-# ---------- Paper ----------
-
-async def cmd_paper_on(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not await _check_allowed(update): return
-    state = _state(ctx)
-    await state.set_paper_enabled(True)
-    set_state("paper_engine_enabled", "1")
-    cid = update.effective_chat.id
-    state.paper_chats.add(cid)
-    upsert_chat(cid, paper_reports_enabled=1)
-    await _reply(update, f"✅ {mdbold('Paper trading ON')}")
-
-
-async def cmd_paper_off(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not await _check_allowed(update): return
-    state = _state(ctx)
-    await state.set_paper_enabled(False)
-    set_state("paper_engine_enabled", "0")
-    cid = update.effective_chat.id
-    state.paper_chats.discard(cid)
-    upsert_chat(cid, paper_reports_enabled=0)
-    await _reply(update, f"❌ {mdbold('Paper trading OFF')}")
-
-
-async def cmd_paper_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not await _check_allowed(update): return
-    await _reply(update, text_paper_status(_state(ctx)))
-
-
-async def cmd_paper_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not await _check_allowed(update): return
-    await _reply(update, text_paper_report(_state(ctx)))
-
-
-async def cmd_paper_reports_on(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Enable pinned trade-open and P&L notifications for this chat."""
-    if not await _check_allowed(update): return
-    from .db import upsert_chat
-    upsert_chat(update.effective_chat.id, paper_reports_enabled=1)
-    await _reply(update, "🟢 Paper trade reports *ON* — you'll get pinned open alerts and P&L close alerts.")
-
-
-async def cmd_paper_reports_off(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Disable paper trade notifications for this chat."""
-    if not await _check_allowed(update): return
-    from .db import upsert_chat
-    upsert_chat(update.effective_chat.id, paper_reports_enabled=0)
-    await _reply(update, "🔴 Paper trade reports *OFF*.")
-
-
 async def cmd_last(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Show the most recent paper trade with its current P&L."""
+    """Show the most recent real SOL trade with its current P&L."""
     if not await _check_allowed(update): return
-    from .trading import get_open_trades
     from .db import db_conn
-    from .utils import closing, fmt_pct, fmt_usd, mdbold, mdcode, now_ts
+    from contextlib import closing as _closing
     from .config import PUMP_FRONT
 
-    with closing(db_conn()) as conn:
+    with _closing(db_conn()) as conn:
         row = conn.execute(
-            "SELECT * FROM paper_trades ORDER BY entry_time DESC LIMIT 1"
+            "SELECT * FROM real_trades ORDER BY entry_time DESC LIMIT 1"
         ).fetchone()
 
     if not row:
-        await _reply(update, "No trades yet.")
+        await _reply(update, "No real trades yet\\. Use /real\\_on to enable trading\\.")
         return
 
-    name   = row["name"] or "Unknown"
-    symbol = row["symbol"] or "???"
-    mint   = row["mint"]
-    status = row["status"]
-    entry_mc  = float(row["entry_mc"])
-    pnl_pct  = float(row["pnl_pct"] or 0)
-    pnl_usd  = float(row["pnl_usd"] or 0)
-    reason   = row["reason"] or ""
+    name     = row["name"] or "Unknown"
+    symbol   = row["symbol"] or "???"
+    mint     = row["mint"]
+    status   = row["status"]
+    entry_mc = float(row["entry_mc"])
+    entry_sol = float(row["entry_sol"])
 
     if status == "OPEN":
         lines = [
-            f"⚡ {mdbold('MOST RECENT TRADE — OPEN')}",
+            f"⚡ {mdbold('LATEST REAL TRADE — OPEN')}",
             f"{mdbold(name)} \\({mdcode('$' + symbol)}\\)",
             "",
             f"💰 Entry MC: {mdcode(fmt_usd(entry_mc, 0))}",
-            f"📊 Size: {mdcode(fmt_usd(float(row['position_size_usd']), 2))}",
+            f"🔷 Size: {mdcode(f'{entry_sol:.4f} SOL')}",
             f"🕐 Opened: {mdcode(fmt_duration(now_ts() - int(row['entry_time'])))} ago",
         ]
     else:
-        sign = "+" if pnl_pct >= 0 else ""
-        arrow = "📈" if pnl_pct >= 0 else "📉"
+        pnl_pct = float(row["pnl_pct"] or 0)
+        pnl_sol = float(row["pnl_sol"] or 0)
+        reason  = row["reason"] or ""
+        arrow   = "📈" if pnl_pct >= 0 else "📉"
         lines = [
-            f"{arrow} {mdbold('MOST RECENT TRADE — CLOSED')}",
+            f"{arrow} {mdbold('LATEST REAL TRADE — CLOSED')}",
             f"{mdbold(name)} \\({mdcode('$' + symbol)}\\)",
             "",
-            f"{arrow} P&L: {mdcode(f'{sign}{pnl_pct:.1f}%')}  "
-            f"${mdcode(f'{pnl_usd:+.2f}')}",
+            f"{arrow} P&L: {mdcode(f'{pnl_pct:+.1f}%')}  "
+            f"\\({mdcode(f'{pnl_sol:+.4f} SOL')}\\)",
             f"📌 Reason: {mdcode(reason)}",
             f"🕐 Closed: {mdcode(fmt_duration(now_ts() - int(row['exit_time'])))} ago",
         ]
@@ -329,26 +277,6 @@ async def cmd_health(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def cmd_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await _check_allowed(update): return
     await _reply(update, text_stats(_state(ctx), ctx.bot_data["engine"]))
-
-
-# ---------- Wallet ----------
-
-async def cmd_wallet(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not await _check_allowed(update): return
-    await _reply(update, await text_wallet())
-
-
-async def cmd_wallet_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not await _check_allowed(update): return
-    amount = PAPER_STARTING_BALANCE_USD
-    if ctx.args and ctx.args[0].replace(".", "").isdigit():
-        amount = float(ctx.args[0])
-    PaperWallet.reset(amount)
-    await _reply(
-        update,
-        f"✅ Wallet reset to {mdcode(fmt_usd(amount, 2))}\n"
-        f"{mditalic('Note: open positions remain — close them manually if needed.')}",
-    )
 
 
 # ---------- Score / backtest / watchlist ----------
@@ -617,24 +545,7 @@ async def cmd_real_off(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_real_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await _check_allowed(update): return
-    s = real_stats()
-    lines = [
-        f"⚡ {mdbold('Real Trading Status')}",
-        f"Enabled: {mdbold('YES ✅') if s['enabled'] else mdbold('NO ❌')}",
-        f"Network: {mdcode(SOLANA_NETWORK)}",
-        f"Open positions: {mdcode(s['open'])}",
-        f"Closed positions: {mdcode(s['closed'])}",
-        f"Avg P&L: {mdcode(fmt_pct(s['avg_pnl_pct'], 1, signed=True))}",
-        "",
-        mdbold("Config:"),
-        f"Size: {mdcode(f'{REAL_POSITION_SIZE_SOL} SOL')} per trade",
-        f"SL: {mdcode(f'{REAL_STOP_LOSS_PCT}%')} | "
-        f"TP: {mdcode(f'{REAL_TAKE_PROFIT_PCT}%')} | "
-        f"Time: {mdcode(fmt_duration(REAL_TIME_STOP_SEC))}",
-        f"Min score: {mdcode(REAL_MIN_SCORE)} | "
-        f"Min prob: {mdcode(fmt_prob(REAL_MIN_PROB))}",
-    ]
-    await _reply(update, "\n".join(lines))
+    await _reply(update, text_trading_status())
 
 
 async def cmd_real_balance(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -653,32 +564,6 @@ async def cmd_real_balance(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_real_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await _check_allowed(update): return
-    s = real_stats()
-    trades = get_open_real_trades()
-
-    lines = [
-        f"📑 {mdbold('Real Trading Report')}",
-        f"Network: {mdcode(SOLANA_NETWORK)} | "
-        f"Enabled: {'✅' if s['enabled'] else '❌'}",
-        "",
-        f"Open: {mdcode(s['open'])} | Closed: {mdcode(s['closed'])}",
-        f"Avg P&L: {mdcode(fmt_pct(s['avg_pnl_pct'], 1, signed=True))}",
-        "",
-        mdbold("Open Positions:"),
-    ]
-    if not trades:
-        lines.append(mditalic("None."))
-    else:
-        for t in trades:
-            mc = (t.entry_mc * 1.1)  # approximate current
-            pnl_pct = ((mc - t.entry_mc) / t.entry_mc * 100
-                       if t.entry_mc > 0 else 0)
-            e = "🟢" if pnl_pct > 0 else ("🔴" if pnl_pct < 0 else "⚪")
-            lines.append(
-                f"• {e} {mdbold(t.name or t.mint[:8])} "
-                f"{mdcode(fmt_pct(pnl_pct, 1, signed=True))} "
-                f"entry {mdcode(fmt_usd(t.entry_mc, 0))}"
-            )
-    await _reply(update, "\n".join(lines))
+    await _reply(update, text_trading_report())
 
 

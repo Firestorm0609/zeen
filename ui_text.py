@@ -5,23 +5,24 @@ from datetime import datetime, timezone
 
 from .config import (
     DB_BACKUP_PATH, DB_PATH, DEAD_LETTER_MAX_RETRIES, LOG_PATH,
-    MIN_TRAIN_SAMPLES, ML_LABEL_WINDOW, PAPER_FEE_PCT, PAPER_MAX_CONCURRENT,
-    PAPER_POSITION_SIZE_USD, PAPER_SLIPPAGE_PCT, PAPER_STOP_LOSS_PCT,
-    PAPER_TAKE_PROFIT_PCT, PAPER_TIME_STOP_SEC, PUMP_FRONT,
-    SNAPSHOT_COUNT,
-    STREAM_DEAD_ALERT_SEC,
+    MIN_TRAIN_SAMPLES, ML_LABEL_WINDOW, PUMP_FRONT,
+    REAL_POSITION_SIZE_SOL, REAL_STOP_LOSS_PCT, REAL_TAKE_PROFIT_PCT,
+    REAL_TIME_STOP_SEC, REAL_FEE_PCT, REAL_SLIPPAGE_PCT,
+    SNAPSHOT_COUNT, STREAM_DEAD_ALERT_SEC,
 )
 from .db import db_conn, get_state
 from .market import MarketContext
 from .scoring import ScoringEngine
 from .state import BotState
-from .trading import get_open_trades, paper_stats
+from .trading import record_creator_token  # still used for creator history
 from .utils import (
     REC_EMOJI, fmt_duration, fmt_pct, fmt_prob, fmt_usd,
     mdbold, mdcode, mditalic, now_ts, safe_float, safe_int, score_emoji,
 )
-from .wallet import PaperWallet, daily_pnl_usd, recent_loss_streak
-from .real_trading import get_wallet_sol_balance, SOLANA_NETWORK
+from .real_trading import (
+    get_wallet_sol_balance, get_open_real_trades, real_stats, SOLANA_NETWORK,
+    REAL_POSITION_SIZE_SOL as _SOL_SIZE,
+)
 
 
 # ---------- Status ----------
@@ -275,71 +276,65 @@ def text_snapshot(n: int = SNAPSHOT_COUNT) -> str:
     return "\n".join(lines)
 
 
-# ---------- Paper ----------
 
-def text_paper_status(state: BotState) -> str:
-    s = paper_stats()
-    s["paper_enabled"] = state.paper_enabled
-    status = "ON" if s["paper_enabled"] else "OFF"
-    trades = get_open_trades()
+# ---------- Real Trading ----------
+
+def text_trading_status() -> str:
+    s = real_stats()
+    status = "ON ✅" if s["enabled"] else "OFF ⛔"
+    trades = get_open_real_trades()
     if trades:
-        avg_sl   = sum(t.dynamic_sl_pct   or PAPER_STOP_LOSS_PCT   for t in trades) / len(trades)
-        avg_tp   = sum(t.dynamic_tp_pct   or PAPER_TAKE_PROFIT_PCT for t in trades) / len(trades)
-        avg_time = sum(t.dynamic_time_stop or PAPER_TIME_STOP_SEC for t in trades) / len(trades)
+        avg_sl   = sum(t.dynamic_sl_pct   or REAL_STOP_LOSS_PCT   for t in trades) / len(trades)
+        avg_tp   = sum(t.dynamic_tp_pct   or REAL_TAKE_PROFIT_PCT for t in trades) / len(trades)
+        avg_time = sum(t.dynamic_time_stop or REAL_TIME_STOP_SEC   for t in trades) / len(trades)
         dyn_note = mditalic("(dynamic/per-trade)")
     else:
-        avg_sl, avg_tp, avg_time = PAPER_STOP_LOSS_PCT, PAPER_TAKE_PROFIT_PCT, PAPER_TIME_STOP_SEC
+        avg_sl, avg_tp, avg_time = REAL_STOP_LOSS_PCT, REAL_TAKE_PROFIT_PCT, REAL_TIME_STOP_SEC
         dyn_note = mditalic("(global defaults)")
     return (
-        f"📋 {mdbold('Paper:')} {mdbold(status)}\n"
+        f"⚡ {mdbold('Real Trading:')} {mdbold(status)}  {mdcode(SOLANA_NETWORK.upper())}\n"
         f"SL {mdcode(f'-{avg_sl:.1f}%')} \\| "
         f"TP {mdcode(f'+{avg_tp:.1f}%')} \\| "
-        f"Time {mdcode(fmt_duration(avg_time))} {dyn_note}\n\n"
+        f"Time {mdcode(fmt_duration(int(avg_time)))} {dyn_note}\n\n"
         f"Open {mdcode(s['open_positions'])} \\| "
         f"Closed {mdcode(s['closed_positions'])}\n"
-        f"Win rate {mdcode(str(round(s['win_rate'],1))+'%')} \\| "
-        f"Avg {mdcode(str(round(s['avg_pnl_pct'],2))+'%')}\n"
-        f"Total PnL {mdcode(fmt_usd(s['total_pnl_usd'], 2))} \\| "
-        f"Max DD {mdcode(fmt_usd(s['max_drawdown_usd'], 2))}"
+        f"Win rate {mdcode(str(round(s['win_rate'], 1)) + '%')} \\| "
+        f"Avg {mdcode(str(round(s['avg_pnl_pct'], 2)) + '%')}\n"
+        f"Total PnL {mdcode(str(round(s['total_pnl_sol'], 4)) + ' SOL')} \\| "
+        f"Max DD {mdcode(str(round(s['max_drawdown_sol'], 4)) + ' SOL')}"
     )
 
 
-def text_paper_report(state: BotState) -> str:
-    s = paper_stats()
-    s["paper_enabled"] = state.paper_enabled
+def text_trading_report() -> str:
+    s = real_stats()
 
     with closing(db_conn()) as conn:
         recent = conn.execute(
             "SELECT mint, name, symbol, entry_mc, exit_mc, entry_time, exit_time, "
-            "pnl_pct, pnl_usd, reason, position_size_usd "
-            "FROM paper_trades WHERE status='CLOSED' ORDER BY exit_time DESC LIMIT 15"
+            "pnl_pct, pnl_sol, reason, position_size_sol "
+            "FROM real_trades WHERE status='CLOSED' ORDER BY exit_time DESC LIMIT 15"
         ).fetchall()
-        open_trades = conn.execute("""
-            SELECT t.mint, t.name, t.symbol, t.entry_mc, t.entry_time,
-                   t.position_size_usd,
-                   (SELECT s.market_cap FROM paper_mc_snapshots s
-                    WHERE s.mint = t.mint
-                    ORDER BY s.created_at DESC LIMIT 1) AS cur_mc
-            FROM paper_trades t WHERE t.status='OPEN'
-            ORDER BY t.entry_time
-        """).fetchall()
         reason_stats = conn.execute(
             "SELECT reason, COUNT(*) AS cnt, "
-            "AVG(pnl_pct) AS avg_pct, SUM(pnl_usd) AS total_usd "
-            "FROM paper_trades WHERE status='CLOSED' AND reason IS NOT NULL "
+            "AVG(pnl_pct) AS avg_pct, SUM(pnl_sol) AS total_sol "
+            "FROM real_trades WHERE status='CLOSED' AND reason IS NOT NULL "
             "GROUP BY reason ORDER BY cnt DESC"
         ).fetchall()
 
     ts_now  = now_ts()
-    enabled = s["paper_enabled"]
-    status  = "ON ✅" if enabled else "OFF ⛔"
     n       = s["closed_positions"]
     wins    = s["wins"]
     losses  = s["losses"]
+    status  = "ON ✅" if s["enabled"] else "OFF ⛔"
 
     lines = [
-        f"📑 {mdbold('Paper Trading Report')}  {mditalic(status)}",
-        f"{mditalic(f'SL {PAPER_STOP_LOSS_PCT}% | TP +{PAPER_TAKE_PROFIT_PCT}% | time {fmt_duration(PAPER_TIME_STOP_SEC)} | size {fmt_usd(PAPER_POSITION_SIZE_USD)}/trade')}",
+        f"📑 {mdbold('Real Trading Report')}  {mditalic(status)}",
+        mditalic(
+            f"Network: {SOLANA_NETWORK.upper()} | "
+            f"SL {REAL_STOP_LOSS_PCT}% | TP +{REAL_TAKE_PROFIT_PCT}% | "
+            f"time {fmt_duration(REAL_TIME_STOP_SEC)} | "
+            f"size {REAL_POSITION_SIZE_SOL} SOL/trade"
+        ),
         "",
         mdbold("📊 Performance"),
     ]
@@ -349,12 +344,12 @@ def text_paper_report(state: BotState) -> str:
         lines += [
             f"Closed {mdcode(n)} \\| "
             f"{mdcode(wins)}W / {mdcode(losses)}L \\| "
-            f"Win rate {mdcode(str(round(s['win_rate'],1))+'%')}",
+            f"Win rate {mdcode(str(round(s['win_rate'], 1)) + '%')}",
             f"Avg PnL {mdcode(fmt_pct(s['avg_pnl_pct'], 2, signed=True))} \\| "
-            f"Total {mdcode(fmt_usd(s['total_pnl_usd'], 2, signed=True))}",
+            f"Total {mdcode(str(round(s['total_pnl_sol'], 4)) + ' SOL')}",
             f"Best {mdcode(fmt_pct(s['best_pnl_pct'], 2, signed=True))} \\| "
             f"Worst {mdcode(fmt_pct(s['worst_pnl_pct'], 2, signed=True))}",
-            f"Max DD {mdcode(fmt_usd(s['max_drawdown_usd'], 2))}",
+            f"Max DD {mdcode(str(round(s['max_drawdown_sol'], 4)) + ' SOL')}",
         ]
 
     if reason_stats:
@@ -363,51 +358,31 @@ def text_paper_report(state: BotState) -> str:
             reason    = r["reason"] or "unknown"
             cnt       = safe_int(r["cnt"])
             avg_pct   = r["avg_pct"]
-            total_usd = r["total_usd"]
+            total_sol = r["total_sol"]
             pct_str = fmt_pct(avg_pct, 1, signed=True) if avg_pct is not None else "—"
-            usd_str = fmt_usd(total_usd, 2, signed=True) if total_usd is not None else "—"
+            sol_str = f"{total_sol:+.4f} SOL" if total_sol is not None else "—"
             lines.append(
                 f"• {mdcode(reason)} "
                 f"{mdcode(cnt)}× \\| "
                 f"avg {mdcode(pct_str)} \\| "
-                f"total {mdcode(usd_str)}"
+                f"total {mdcode(sol_str)}"
             )
 
-    lines += ["", mdbold(f"📂 Open Positions ({len(open_trades)}/{PAPER_MAX_CONCURRENT})")]
+    open_trades = get_open_real_trades()
+    lines += ["", mdbold(f"📂 Open Positions ({len(open_trades)})")]
     if not open_trades:
         lines.append(mditalic("None."))
     else:
-        # Show per-trade dynamic exit parameters
-        trades_objs = get_open_trades()
-        trade_map = {t.mint: t for t in trades_objs}
         for t in open_trades:
-            name     = t["name"] or t["symbol"] or (t["mint"] or "?")[:6]
-            entry_mc = safe_float(t["entry_mc"])
-            age_sec  = ts_now - safe_int(t["entry_time"])
-            size     = safe_float(t["position_size_usd"])
-            cur_mc   = t["cur_mc"]
-            unreal_str = ""
-            if cur_mc is not None and entry_mc > 0:
-                unreal = ((safe_float(cur_mc) - entry_mc) / entry_mc) * 100
-                e = "🟢" if unreal > 0 else ("🔴" if unreal < 0 else "⚪")
-                unreal_str = f" {e} {mdcode(fmt_pct(unreal, 1, signed=True))}"
-
-            # Per-trade dynamic exit info
-            obj = trade_map.get(t["mint"])
-            if obj:
-                sl   = obj.dynamic_sl_pct   or PAPER_STOP_LOSS_PCT
-                tp   = obj.dynamic_tp_pct   or PAPER_TAKE_PROFIT_PCT
-                tsec = obj.dynamic_time_stop or PAPER_TIME_STOP_SEC
-                dyn  = mditalic(f"SL {sl:.1f}% TP {tp:.1f}% time {fmt_duration(tsec)}")
-            else:
-                dyn  = mditalic("(no dynamic params)")
-
+            age_sec = ts_now - t.entry_time
+            e = "⚪"
             lines.append(
-                f"• {mdbold(name)} "
-                f"entry {mdcode(fmt_usd(entry_mc))} \\| "
+                f"• {mdbold(t.name or t.mint[:8])} "
+                f"entry {mdcode(fmt_usd(t.entry_mc, 0))} \\| "
                 f"age {mdcode(fmt_duration(age_sec))} \\| "
-                f"size {mdcode(fmt_usd(size))}{unreal_str}\n"
-                f"  {dyn}"
+                f"{mdcode(f'{t.position_size_sol:.4f} SOL')}\n"
+                f"  {mditalic(f'SL {t.dynamic_sl_pct:.1f}% TP {t.dynamic_tp_pct:.1f}% '
+                              f'time {fmt_duration(t.dynamic_time_stop)}')}"
             )
 
     lines += ["", mdbold("🕒 Last 15 Trades")]
@@ -418,7 +393,7 @@ def text_paper_report(state: BotState) -> str:
             mint     = r["mint"] or ""
             name_raw = r["name"] or r["symbol"] or (mint[:6] if mint else "?")
             pnl      = safe_float(r["pnl_pct"])
-            usd      = safe_float(r["pnl_usd"])
+            sol      = safe_float(r["pnl_sol"])
             entry_mc = safe_float(r["entry_mc"])
             exit_mc  = safe_float(r["exit_mc"])
             entry_t  = safe_int(r["entry_time"])
@@ -431,7 +406,7 @@ def text_paper_report(state: BotState) -> str:
             line1 = (
                 f"{pnl_e} {mdbold(name_raw)} "
                 f"{mdcode(fmt_pct(pnl, 2, signed=True))} "
-                f"\\({mdcode(fmt_usd(usd, 2, signed=True))}\\)"
+                f"\\({mdcode(f'{sol:+.4f} SOL')}\\)"
             )
             mc_arrow = (f"{mdcode(fmt_usd(entry_mc))}→{mdcode(fmt_usd(exit_mc))}"
                         if entry_mc and exit_mc else "")
@@ -439,13 +414,19 @@ def text_paper_report(state: BotState) -> str:
             reason_s = mditalic(reason)
 
             details = [p for p in [mc_arrow, dur_str, reason_s] if p]
-            line2 = "    " + " \\| ".join(details) if details else ""
+            line2   = "    " + " \\| ".join(details) if details else ""
 
             lines.append(line1)
             if line2:
                 lines.append(line2)
 
     return "\n".join(lines)
+
+    if reason_stats:
+        lines += ["", mdbold("🎯 Exit Reasons")]
+        for r in reason_stats:
+            reason    = r["reason"] or "unknown"
+            cnt       = safe_int(r["cnt"])
 
 
 # ---------- Stats / wallet / top ----------
@@ -509,11 +490,7 @@ def query_time_to_pump_data() -> list[dict]:
 
 def text_stats(state: BotState, engine: ScoringEngine) -> str:
     ts_now = now_ts()
-    eq = PaperWallet.equity()
-    starting = eq["starting"]
-    total    = eq["total_equity"]
-    pnl_pct  = ((total - starting) / starting * 100) if starting > 0 else 0
-    pnl_e    = "🟢" if pnl_pct > 0 else ("🔴" if pnl_pct < 0 else "⚪")
+    s = real_stats()
 
     with closing(db_conn()) as conn:
         sig_24h = conn.execute(
@@ -533,12 +510,9 @@ def text_stats(state: BotState, engine: ScoringEngine) -> str:
     total_24h = sum(out_map.values())
     pump_rate_24h = (pumps_24h / total_24h * 100) if total_24h > 0 else 0
 
-    streak = recent_loss_streak()
-    daily  = daily_pnl_usd()
-
-    s = engine.status()
-    cv_str = f"{s['cv_auc']:.3f}" + (
-        f" ±{s['cv_auc_std']:.3f}" if s["cv_auc_std"] else ""
+    eng = engine.status()
+    cv_str = f"{eng['cv_auc']:.3f}" + (
+        f" ±{eng['cv_auc_std']:.3f}" if eng["cv_auc_std"] else ""
     )
 
     ttp = query_time_to_pump_data()
@@ -552,15 +526,19 @@ def text_stats(state: BotState, engine: ScoringEngine) -> str:
                 f"\\(n={mdcode(r['n'])}\\)"
             )
 
+    pnl_e = "🟢" if s["total_pnl_sol"] > 0 else ("🔴" if s["total_pnl_sol"] < 0 else "⚪")
+
     lines = [
         f"📊 {mdbold('Bot Stats Dashboard')}",
         "",
-        mdbold("💰 Wallet"),
-        f"Balance: {mdcode(fmt_usd(eq['balance'], 2))}",
-        f"Open positions: {mdcode(fmt_usd(eq['positions_value'], 2))}",
-        f"Total equity: {mdcode(fmt_usd(total, 2))}",
-        f"P&L vs start: {pnl_e} {mdcode(fmt_pct(pnl_pct, 2, signed=True))}",
-        f"24h realized: {mdcode(fmt_usd(daily, 2, signed=True))}",
+        mdbold(f"⚡ Trading ({SOLANA_NETWORK.upper()})"),
+        f"Status: {'✅ ON' if s['enabled'] else '⛔ OFF'}",
+        f"Open positions: {mdcode(s['open_positions'])}",
+        f"Closed: {mdcode(s['closed_positions'])} "
+        f"\\({mdcode(s['wins'])}W / {mdcode(s['losses'])}L\\)",
+        f"Win rate: {mdcode(str(round(s['win_rate'], 1)) + '%')} \\| "
+        f"Avg P&L: {mdcode(fmt_pct(s['avg_pnl_pct'], 2, signed=True))}",
+        f"Total P&L: {pnl_e} {mdcode(str(round(s['total_pnl_sol'], 4)) + ' SOL')}",
         "",
         mdbold("📡 Last 24h"),
         f"Signals scored: {mdcode(sig_24h)}",
@@ -569,12 +547,11 @@ def text_stats(state: BotState, engine: ScoringEngine) -> str:
         f"Rugs: {mdcode(rugs_24h)}",
         "",
         mdbold("🤖 Model"),
-        f"Mode: {mdcode(s['mode'])}",
+        f"Mode: {mdcode(eng['mode'])}",
         f"CV AUC: {mdcode(cv_str)}",
-        f"Samples: {mdcode(s['n_train_samples'])}",
+        f"Samples: {mdcode(eng['n_train_samples'])}",
         "",
         mdbold("🛡 Defense"),
-        f"Loss streak: {mdcode(streak)}",
         f"Blacklisted creators: {mdcode(bl_count)}",
     ]
     lines.extend(ttp_lines)
@@ -582,29 +559,25 @@ def text_stats(state: BotState, engine: ScoringEngine) -> str:
 
 
 async def text_wallet() -> str:
-    eq = PaperWallet.equity()
-    starting = eq["starting"]
-    total    = eq["total_equity"]
-    pnl_pct  = ((total - starting) / starting * 100) if starting > 0 else 0
-    pnl_e    = "🟢" if pnl_pct > 0 else ("🔴" if pnl_pct < 0 else "⚪")
-
+    """Show real SOL wallet balance and trading summary."""
     sol_bal = await get_wallet_sol_balance()
-    sol_line = f"SOL: {mdcode(f'{sol_bal:.4f} SOL')} ({mdcode(fmt_usd(sol_bal * 180, 2))})"
+    s = real_stats()
+    pnl_e = "🟢" if s["total_pnl_sol"] > 0 else ("🔴" if s["total_pnl_sol"] < 0 else "⚪")
 
     return "\n".join([
-        f"💰 {mdbold('Paper Wallet')}",
+        f"💰 {mdbold('SOL Wallet')} — {mdcode(SOLANA_NETWORK.upper())}",
         "",
-        f"Starting: {mdcode(fmt_usd(starting, 2))}",
-        f"Balance: {mdcode(fmt_usd(eq['balance'], 2))}",
-        f"In positions: {mdcode(fmt_usd(eq['positions_value'], 2))}",
-        f"Unrealized: {mdcode(fmt_usd(eq['unrealized'], 2, signed=True))}",
-        f"Total equity: {mdcode(fmt_usd(total, 2))}",
-        f"Return: {pnl_e} {mdcode(fmt_pct(pnl_pct, 2, signed=True))}",
+        f"Balance: {mdcode(f'{sol_bal:.4f} SOL')}",
+        f"Open positions: {mdcode(s['open_positions'])}",
         "",
-        mditalic(f"Fees: {PAPER_FEE_PCT}% per side | Slippage: {PAPER_SLIPPAGE_PCT}%"),
+        mdbold("📊 Trading Summary"),
+        f"Closed trades: {mdcode(s['closed_positions'])} "
+        f"\\({mdcode(s['wins'])}W / {mdcode(s['losses'])}L\\)",
+        f"Total P&L: {pnl_e} {mdcode(str(round(s['total_pnl_sol'], 4)) + ' SOL')}",
+        f"Max drawdown: {mdcode(str(round(s['max_drawdown_sol'], 4)) + ' SOL')}",
         "",
-        f"🔗 {mdbold('Real Wallet')} ({mdcode(SOLANA_NETWORK)})",
-        sol_line,
+        mditalic(f"Size: {REAL_POSITION_SIZE_SOL} SOL/trade | "
+                 f"Fee: {REAL_FEE_PCT}% | Slippage: {REAL_SLIPPAGE_PCT}%"),
     ])
 
 
@@ -675,7 +648,7 @@ def text_health(state: BotState, engine: ScoringEngine) -> str:
             (DEAD_LETTER_MAX_RETRIES,)
         ).fetchone()["c"]
         open_trades = conn.execute(
-            "SELECT COUNT(*) AS c FROM paper_trades WHERE status='OPEN'"
+            "SELECT COUNT(*) AS c FROM real_trades WHERE status='OPEN'"
         ).fetchone()["c"]
         pending_lb = conn.execute(
             "SELECT COUNT(*) AS c FROM lookbacks WHERE checked=0"
@@ -700,7 +673,7 @@ def text_health(state: BotState, engine: ScoringEngine) -> str:
         f"Signals total: {mdcode(total_signals)} \\| last 1hr: {mdcode(signals_1hr)}",
         f"Dead letters: {mdcode(dead_letters)} \\| pending retry: {mdcode(dead_unretried)}",
         f"Lookbacks pending: {mdcode(pending_lb)}",
-        f"Open paper trades: {mdcode(open_trades)}",
+        f"Open real trades: {mdcode(open_trades)}",
         "",
         f"DB: {mdcode(DB_PATH)} \\| backup: {mdcode(DB_BACKUP_PATH)}",
         f"Log: {mdcode(LOG_PATH)}",
@@ -725,9 +698,11 @@ def text_help() -> str:
         f"{mdcode('/model')} — show ML model status",
         f"{mdcode('/train')} — retrain model now",
         f"{mdcode('/snapshot')} — show recent signals",
-        f"{mdcode('/paper_on')} \\| {mdcode('/paper_off')} — toggle paper trading",
-        f"{mdcode('/paper_status')} — paper summary",
-        f"{mdcode('/paper_report')} — detailed paper report",
+        f"{mdcode('/real_on')} \\| {mdcode('/real_off')} — toggle SOL trading",
+        f"{mdcode('/real_status')} — trading summary",
+        f"{mdcode('/real_report')} — detailed P&L report",
+        f"{mdcode('/real_balance')} — show SOL wallet balance",
+        f"{mdcode('/last')} — show most recent trade",
         f"{mdcode('/health')} — bot health and stream status",
         f"{mdcode('/score <mint>')} — manually score any coin \\(not saved\\)",
         f"{mdcode('/backtest')} — signal performance by score bucket",

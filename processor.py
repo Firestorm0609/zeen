@@ -14,18 +14,12 @@ from .scoring import ScoringEngine
 from .state import BotState
 from .storage import save_signal, save_snapshot
 from .lookback import schedule_lookbacks
-from .trading import (
-    maybe_close_paper_trades_for_coin, maybe_open_paper_trade,
-    record_creator_token,
-)
+from .trading import record_creator_token
 from .real_trading import maybe_open_real_trade
 from .utils import safe_float, safe_int
 
 log = logging.getLogger(__name__)
 
-# Semaphore is created lazily on first use (or explicitly via init_semaphore)
-# to avoid creating asyncio primitives before an event loop is running,
-# which raises DeprecationWarning on Python < 3.10.
 _semaphore: asyncio.Semaphore | None = None
 
 
@@ -70,7 +64,6 @@ async def process_coin(coin: dict, bot: Bot, engine: ScoringEngine,
             if await state.seen_recently(mint):
                 return
 
-            # Update stream-health state atomically (single field write)
             state.last_coin_ts = _time.time()
             state.stream_dead_alerted = False
 
@@ -81,7 +74,6 @@ async def process_coin(coin: dict, bot: Bot, engine: ScoringEngine,
                 market_ctx.update(mc, replies)
 
             await loop.run_in_executor(None, save_snapshot, coin)
-            await loop.run_in_executor(None, maybe_close_paper_trades_for_coin, coin, bot)
 
             ok, reason = hard_filter(coin)
             if not ok:
@@ -98,7 +90,6 @@ async def process_coin(coin: dict, bot: Bot, engine: ScoringEngine,
             if creator and mint:
                 await loop.run_in_executor(None, record_creator_token, creator, mint)
 
-            await loop.run_in_executor(None, maybe_open_paper_trade, state, coin, result, market_ctx, bot)
             await maybe_open_real_trade(state, coin, result, market_ctx, bot)
             await send_alert(bot, coin, result, state)
 
@@ -109,4 +100,3 @@ async def process_coin(coin: dict, bot: Bot, engine: ScoringEngine,
             mint = coin.get("mint")
             if mint:
                 await state.mark_seen(mint)
-
