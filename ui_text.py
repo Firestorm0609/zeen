@@ -381,8 +381,7 @@ def text_trading_report() -> str:
                 f"entry {mdcode(fmt_usd(t.entry_mc, 0))} \\| "
                 f"age {mdcode(fmt_duration(age_sec))} \\| "
                 f"{mdcode(f'{t.position_size_sol:.4f} SOL')}\n"
-                f"  {mditalic(f'SL {t.dynamic_sl_pct:.1f}% TP {t.dynamic_tp_pct:.1f}% '
-                              f'time {fmt_duration(t.dynamic_time_stop)}')}"
+                f"  {mditalic(f'SL {t.dynamic_sl_pct:.1f}% TP {t.dynamic_tp_pct:.1f}% time {fmt_duration(t.dynamic_time_stop)}')}"
             )
 
     lines += ["", mdbold("🕒 Last 15 Trades")]
