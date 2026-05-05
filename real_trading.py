@@ -38,7 +38,7 @@ from .utils import now_ts, safe_float, safe_int
 
 log = logging.getLogger(__name__)
 
-SOL_MINT = "So11111111111111111111111111111111111111112"
+SOL_MINT = "So11111111111111111111111111111111111112"
 
 
 # ---------- Wallet ----------
@@ -149,8 +149,8 @@ def _sign_and_submit(base64_tx: str, secret_key: bytes) -> tuple[bool, str]:
         tx_bytes = base64.b64decode(base64_tx)
         tx = _tx.VersionedTransaction.from_bytes(tx_bytes)
         kp = _kp.Keypair.from_bytes(secret_key)
-        tx.sign([kp])
-        signed_bytes = bytes(tx)
+        signed_tx = _tx.VersionedTransaction(tx.message, [kp])
+        signed_bytes = bytes(signed_tx)
         encoded = base64.b64encode(signed_bytes).decode()
 
         url = _get_rpc_url()
