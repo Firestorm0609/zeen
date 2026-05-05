@@ -558,7 +558,10 @@ def text_stats(state: BotState, engine: ScoringEngine) -> str:
 
 
 async def text_wallet() -> str:
-    """Show real SOL wallet balance and trading summary."""
+    """Show real SOL wallet balance, address and trading summary."""
+    from .real_trading import _load_wallet
+    wallet = _load_wallet()
+    address = wallet["pubkey"] if wallet else "not loaded"
     sol_bal = await get_wallet_sol_balance()
     s = real_stats()
     pnl_e = "🟢" if s["total_pnl_sol"] > 0 else ("🔴" if s["total_pnl_sol"] < 0 else "⚪")
@@ -566,6 +569,7 @@ async def text_wallet() -> str:
     return "\n".join([
         f"💰 {mdbold('SOL Wallet')} — {mdcode(SOLANA_NETWORK.upper())}",
         "",
+        f"Address: {mdcode(address)}",
         f"Balance: {mdcode(f'{sol_bal:.4f} SOL')}",
         f"Open positions: {mdcode(s['open_positions'])}",
         "",
