@@ -103,7 +103,7 @@ async def _jupiter_quote(
     input_mint: str, output_mint: str, amount: int, slippage_bps: int,
 ) -> Optional[dict]:
     url = (
-        f"https://quote-api.jup.ag/v6/quote"
+        f"https://api.jup.ag/swap/v1/quote"
         f"?inputMint={input_mint}&outputMint={output_mint}"
         f"&amount={amount}&slippageBps={slippage_bps}&onlyDirectRoutes=false"
     )
@@ -121,7 +121,7 @@ async def _jupiter_quote(
 async def _jupiter_swap(
     session: aiohttp.ClientSession, quote: dict, wallet_pubkey: str,
 ) -> Optional[dict]:
-    url = "https://quote-api.jup.ag/v6/swap"
+    url = "https://api.jup.ag/swap/v1/swap"
     payload = {
         "quoteResponse": quote,
         "userPublicKey": wallet_pubkey,
