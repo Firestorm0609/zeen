@@ -35,7 +35,7 @@ from .utils import (
 )
 from .real_trading import (
     real_engine, real_stats, swap_sol_for_token, get_wallet_sol_balance,
-    get_open_real_trades, SOLANA_NETWORK, REAL_POSITION_SIZE_SOL,
+    get_open_real_trades, SOLANA_NETWORK, REAL_POSITION_SIZE_SOL, SOLANA_WALLET_PATH,
     REAL_STOP_LOSS_PCT, REAL_TAKE_PROFIT_PCT, REAL_TIME_STOP_SEC,
 )
 
@@ -567,3 +567,98 @@ async def cmd_real_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await _reply(update, text_trading_report())
 
 
+async def cmd_trade_size(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Set trade size: /trade_size 0.25"""
+    if not await _check_allowed(update): return
+    from .db import get_state, set_state
+    args = ctx.args
+    if not args:
+        current = float(get_state("real_position_size_sol") or REAL_POSITION_SIZE_SOL)
+        await _reply(update,
+            f"💱 {mdbold('Trade Size')}\n"
+            f"Current: {mdcode(f'{current} SOL')} per trade\n\n"
+            f"Usage: {mdcode('/trade_size 0.25')}\n"
+            f"Min: {mdcode('0.01')} | Max: {mdcode('10.0')}"
+        )
+        return
+    try:
+        val = float(args[0])
+    except ValueError:
+        await _reply(update, "❌ Invalid number\\. Example: /trade_size 0\\.25")
+        return
+    if not 0.01 <= val <= 10.0:
+        await _reply(update, "❌ Must be between 0\\.01 and 10\\.0 SOL")
+        return
+    set_state("real_position_size_sol", str(val))
+    await _reply(update, f"✅ Trade size set to {mdcode(f'{val} SOL')} per trade")
+
+
+async def cmd_import_wallet(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Import wallet: /import_wallet <base58_key or JSON array>"""
+    if not await _check_allowed(update): return
+    import json as _json
+
+    # Delete the message immediately for security
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    args = ctx.args
+    if not args:
+        await _reply(update,
+            f"📥 {mdbold('Import Wallet')}\n\n"
+            f"Usage: {mdcode('/import_wallet <private_key>')}\n"
+            f"Accepts base58 or 64\\-byte JSON array\\.\n\n"
+            f"⚠️ {mditalic('Use in private chat only\\.')}"
+        )
+        return
+
+    raw = " ".join(args).strip()
+    secret_bytes = None
+
+    # Try JSON array
+    try:
+        arr = _json.loads(raw)
+        if isinstance(arr, list) and len(arr) == 64:
+            secret_bytes = bytes(arr)
+    except Exception:
+        pass
+
+    # Try base58
+    if secret_bytes is None:
+        try:
+            import base58 as _b58
+            decoded = _b58.b58decode(raw)
+            if len(decoded) == 64:
+                secret_bytes = decoded
+        except Exception:
+            pass
+
+    if secret_bytes is None:
+        await _reply(update, "❌ Invalid key\\. Must be 64\\-byte JSON array or base58 string\\.")
+        return
+
+    try:
+        from solders.keypair import Keypair
+        kp = Keypair.from_bytes(secret_bytes)
+        pubkey = str(kp.pubkey())
+    except Exception as e:
+        await _reply(update, f"❌ Failed to load keypair: {mdcode(str(e))}")
+        return
+
+    # Back up existing wallet and save new one
+    import os, shutil
+    wallet_path = SOLANA_WALLET_PATH
+    if os.path.exists(wallet_path):
+        shutil.copy(wallet_path, wallet_path + ".bak")
+
+    with open(wallet_path, "w") as f:
+        _json.dump(list(secret_bytes), f)
+
+    await _reply(update,
+        f"✅ {mdbold('Wallet imported')}\n\n"
+        f"Address: {mdcode(pubkey)}\n"
+        f"Network: {mdcode(SOLANA_NETWORK.upper())}\n\n"
+        f"{mditalic('Old wallet backed up to wallet\\.json\\.bak')}"
+    )
