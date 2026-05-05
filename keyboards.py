@@ -56,11 +56,38 @@ def more_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("📊 Backtest",  callback_data="backtest"),
             InlineKeyboardButton("⚡ Last Trade", callback_data="last"),
         ],
+        [
+            InlineKeyboardButton("💱 Trade Size",   callback_data="trade_size_menu"),
+            InlineKeyboardButton("👛 Wallet Mgmt",  callback_data="wallet_menu"),
+        ],
         [InlineKeyboardButton("🔙 Main Menu", callback_data="menu")],
     ])
 
 
-def back_keyboard() -> InlineKeyboardMarkup:
+def trade_size_keyboard(current: float = 0.1) -> InlineKeyboardMarkup:
+    sizes = [0.05, 0.1, 0.25, 0.5, 1.0]
+    buttons = []
+    for s in sizes:
+        label = f"{'✅ ' if abs(s - current) < 0.001 else ''}{s} SOL"
+        buttons.append(InlineKeyboardButton(label, callback_data=f"set_size_{s}"))
+    return InlineKeyboardMarkup([
+        buttons[:3],
+        buttons[3:],
+        [InlineKeyboardButton("✏️ Custom (/trade_size)", callback_data="size_custom_hint")],
+        [InlineKeyboardButton("🔙 Back", callback_data="more")],
+    ])
+
+
+def wallet_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📋 Show Address", callback_data="wallet_address")],
+        [InlineKeyboardButton("🔑 Export Private Key", callback_data="wallet_export_key")],
+        [InlineKeyboardButton("📥 Import Wallet", callback_data="wallet_import_hint")],
+        [InlineKeyboardButton("🔙 Back", callback_data="more")],
+    ])
+
+
+
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("🔙 Menu", callback_data="menu"),
     ]])
