@@ -101,3 +101,9 @@ def threshold_keyboard() -> InlineKeyboardMarkup:
          for i in range(6, 11)],
         [InlineKeyboardButton("🔙 Back", callback_data="menu")],
     ])
+
+
+def back_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(text="⬅️ Back", callback_data="back")]
+    ])
