@@ -711,8 +711,7 @@ def text_help() -> str:
         "",
         mdbold("Wallet & Stats:"),
         f"{mdcode('/stats')} — daily dashboard",
-        f"{mdcode('/wallet')} — paper wallet status",
-        f"{mdcode('/wallet_reset [amount]')} — reset paper wallet",
+        f"{mdcode('/wallet')} — SOL wallet balance and P&L summary",
         f"{mdcode('/top [days]')} — best signals recently",
         f"{mdcode('/blacklist [add|remove] <wallet>')} — manage creator blacklist",
         "",
@@ -774,27 +773,26 @@ def text_real_report() -> str:
 
 
 def text_last_trade() -> str:
-    from .trading import get_open_trades
+    from .real_trading import get_open_real_trades
     from .db import db_conn
     from .config import PUMP_FRONT
 
     with closing(db_conn()) as conn:
         row = conn.execute(
-            "SELECT * FROM paper_trades ORDER BY entry_time DESC LIMIT 1"
+            "SELECT * FROM real_trades ORDER BY entry_time DESC LIMIT 1"
         ).fetchone()
 
     if not row:
         return "No trades yet."
 
-    from .utils import closing
     name   = row["name"] or "Unknown"
     symbol = row["symbol"] or "???"
     mint   = row["mint"]
     status = row["status"]
     entry_mc  = float(row["entry_mc"])
-    pnl_pct  = float(row["pnl_pct"] or 0)
-    pnl_usd  = float(row["pnl_usd"] or 0)
-    reason   = row["reason"] or ""
+    pnl_pct   = float(row["pnl_pct"] or 0)
+    pnl_sol   = float(row["pnl_sol"] or 0)
+    reason    = row["reason"] or ""
 
     if status == "OPEN":
         return "\n".join([
@@ -802,7 +800,7 @@ def text_last_trade() -> str:
             f"{mdbold(name)} ({mdcode('$' + symbol)})",
             "",
             f"💰 Entry MC: {mdcode(fmt_usd(entry_mc, 0))}",
-            f"📊 Size: {mdcode(fmt_usd(float(row['position_size_usd']), 2))}",
+            f"📊 Size: {mdcode(str(float(row['position_size_sol'])) + ' SOL')}",
             f"🕐 Opened: {mdcode(fmt_duration(now_ts() - int(row['entry_time'])))} ago",
             f"🪙 {mdcode(mint)}" if mint else "",
             f"🔗 [Pump.fun]({PUMP_FRONT}/{mint})" if mint else "",
@@ -815,7 +813,7 @@ def text_last_trade() -> str:
             f"{mdbold(name)} ({mdcode('$' + symbol)})",
             "",
             f"{arrow} P&L: {mdcode(f'{sign}{pnl_pct:.1f}%')}  "
-            f"${mdcode(f'{pnl_usd:+.2f}')}",
+            f"{mdcode(f'{pnl_sol:+.4f} SOL')}",
             f"📌 Reason: {mdcode(reason)}",
             f"🕐 Closed: {mdcode(fmt_duration(now_ts() - int(row['exit_time'])))} ago",
             f"🪙 {mdcode(mint)}" if mint else "",
