@@ -660,5 +660,5 @@ async def cmd_import_wallet(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"✅ {mdbold('Wallet imported')}\n\n"
         f"Address: {mdcode(pubkey)}\n"
         f"Network: {mdcode(SOLANA_NETWORK.upper())}\n\n"
-        f"{mditalic('Old wallet backed up to wallet\\.json\\.bak')}"
+        + mditalic('Old wallet backed up to wallet\\.json\\.bak')
     )
