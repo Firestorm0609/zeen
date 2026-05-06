@@ -24,7 +24,7 @@ from .ui_text import (
     text_health, text_help, text_real_status, text_real_report,
     text_last_trade,
 )
-from .utils import mdbold, mdcode, strip_md2
+from .utils import mdbold, mdcode, mditalic, strip_md2
 from .commands import do_train
 from .real_trading import real_engine, SOLANA_NETWORK, REAL_POSITION_SIZE_SOL
 
