@@ -142,24 +142,21 @@ async def send_trade_opened(
     tsec   = trade.dynamic_time_stop or 14400
 
     lines = [
-        f"ðŸ" + "‡" + " {mdbold('PAPER TRADE OPENED')}",
-        f"{mdbold(name)} \\({mdcode('$' + symbol)}\\)",
+        f"🟢 {mdbold('PAPER TRADE OPENED')}",
+        f"{mdbold(name)} \\\\({mdcode('$' + symbol)}\\\\)",
         "",
-        f"ðŸ" + "’" + " Size: {mdcode(fmt_usd(size, 2))}",
-        f"ðŸ" + "’" + " Entry MC: {mdcode(fmt_usd(mc, 0))}",
-        f"ðŸ" + "“" + " Score: {mdcode(str(score) + '/10')}  "
-        f"Prob: {mdcode(fmt_prob(prob))}",
+        f"💵 Size: {mdcode(fmt_usd(size, 2))}",
+        f"📊 Entry MC: {mdcode(fmt_usd(mc, 0))}",
+        f"🎯 Score: {mdcode(str(score) + '/10')}  Prob: {mdcode(fmt_prob(prob))}",
         "",
-        f"ðŸ" + "š" + " SL: {mdcode(f'{sl:.1f}%')}  "
-        f"TP: {mdcode(f'{tp:.1f}%')}  "
-        f"Time: {mdcode(fmt_duration(tsec))}",
+        f"🛑 SL: {mdcode(f'{sl:.1f}%')}  TP: {mdcode(f'{tp:.1f}%')}  Time: {mdcode(fmt_duration(tsec))}",
     ]
     if mint:
-        lines.append(f"ðŸ" + "ª™" + " {mdcode(mint)}")
-        lines.append(f"ðŸ" + "”—" + " [Pump\\.fun]({PUMP_FRONT}/{mint})")
+        lines.append(f"🪙 {mdcode(mint)}")
+        lines.append(f"🔗 [Pump\\\\.fun]({PUMP_FRONT}/{mint})")
 
     text = "\n".join(lines)
-    kb_rows = [[InlineKeyboardButton("ðŸ" + "”—" + " Open on Pump.fun",
+    kb_rows = [[InlineKeyboardButton("🔗 Open on Pump.fun",
                                      url=f"{PUMP_FRONT}/{mint}")]] if mint else []
     kb = InlineKeyboardMarkup(kb_rows) if kb_rows else None
 
@@ -207,18 +204,17 @@ async def send_trade_closed(
                if trade.entry_mc > 0 else 0)
 
     sign = "+" if pnl_pct >= 0 else ""
-    arrow = "ðŸ" + "š" + "—" if pnl_pct >= 0 else "ðŸ" + "š" + "“"
-    color = "ðŸ" + "Ÿ" if pnl_pct >= 0 else "ðŸ" + "”"
+    arrow = "📈" if pnl_pct >= 0 else "📉"
+    color = "🟢" if pnl_pct >= 0 else "🔴"
 
     lines = [
         f"{color} {mdbold('PAPER TRADE CLOSED')}",
-        f"{mdbold(name)} \\({mdcode('$' + symbol)}\\)",
+        f"{mdbold(name)} \\\\({mdcode('$' + symbol)}\\\\)",
         "",
         f"{arrow} P&L: {mdcode(f'{sign}{pnl_pct:.1f}%')}  "
         f"${mdcode(f'{pnl_usd:+.2f}')}",
-        f"ðŸ" + "’”" + f" Reason: {mditalic(reason)}",
-        f"ðŸ" + "’" + " Duration: "
-        f"{mdcode(fmt_duration(now_ts() - trade.entry_time))}",
+        f"📋 Reason: {mditalic(reason)}",
+        f"⏱ Duration: {mdcode(fmt_duration(now_ts() - trade.entry_time))}",
     ]
 
     text = "\n".join(lines)
