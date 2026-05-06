@@ -429,7 +429,8 @@ class RealTradingEngine:
         trade = RealTrade(
             id=trade_id, mint=mint, name=name, symbol=symbol,
             entry_time=ts, entry_sol=size_sol, entry_mc=mc,
-            position_size_sol=size_sol, token_amount=token_amount,
+            position_size_sol=size_sol,
+            token_amount=token_amount,   # raw lamports as returned by Jupiter outAmount
             entry_score=safe_int(result.get("score", 0)),
             entry_prob=safe_float(result.get("probability", 0)),
             highest_mc=mc, trailing_stop_price=mc,
@@ -444,7 +445,7 @@ class RealTradingEngine:
                     f"⚡ *REAL TRADE OPENED* — {SOLANA_NETWORK.upper()}\n"
                     f"🪙 {escape_markdown(name or mint[:8], version=2)}\n"
                     f"Size: `{size_sol} SOL`\n"
-                    f"SL: `{sl:.1f}%` | TP: `{tp:.1f}%` | Time: `{time_sec}s`"
+                    f"SL: `{sl:.1f}%` \\| TP: `{tp:.1f}%` \\| Time: `{time_sec}s`"
                 )
                 for cid in list(state.alerts.keys()):
                     try:
@@ -504,6 +505,7 @@ async def real_monitor_loop(bot=None) -> None:
                                     "UPDATE real_trades SET highest_mc=?, trailing_stop_price=? "
                                     "WHERE id=? AND status='OPEN'",
                                     (hmc, tsp, tid))
+                        db_write(_w)
 
                     # Exit checks
                     sl_pct = t.dynamic_sl_pct or REAL_STOP_LOSS_PCT
@@ -533,8 +535,8 @@ async def real_monitor_loop(bot=None) -> None:
                         # Execute sell: token -> SOL
                         wallet = _load_wallet()
                         if wallet and not wallet.get("simulated") and t.token_amount > 0:
-                            # Convert token_amount to raw lamports (assuming 6 decimals for pump tokens)
-                            raw_amount = int(t.token_amount * 1_000_000)
+                            # token_amount is already stored as raw lamports (Jupiter outAmount)
+                            raw_amount = int(t.token_amount)
                             ok, msg, sol_received = await swap_token_for_sol(
                                 session, t.mint, raw_amount, wallet)
                             if ok:
