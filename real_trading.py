@@ -540,7 +540,8 @@ async def real_monitor_loop(bot=None) -> None:
                             ok, msg, sol_received = await swap_token_for_sol(
                                 session, t.mint, raw_amount, wallet)
                             if ok:
-                                exit_mc = sol_received / (t.position_size_sol or 1) * t.entry_mc
+                                sol_received_sol = sol_received / 1_000_000_000
+                                exit_mc = sol_received_sol / (t.position_size_sol or 1) * t.entry_mc
                             else:
                                 exit_mc = mc
                         else:

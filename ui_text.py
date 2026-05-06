@@ -738,10 +738,10 @@ def text_real_status(engine) -> str:
         "",
         mdbold("Config:"),
         f"Size: {mdcode(f'{REAL_POSITION_SIZE_SOL} SOL')} per trade",
-        f"SL: {mdcode(f'{REAL_STOP_LOSS_PCT}%')} | "
-        f"TP: {mdcode(f'{REAL_TAKE_PROFIT_PCT}%')} | "
+        f"SL: {mdcode(f'{REAL_STOP_LOSS_PCT}%')} \\| "
+        f"TP: {mdcode(f'{REAL_TAKE_PROFIT_PCT}%')} \\| "
         f"Time: {mdcode(fmt_duration(REAL_TIME_STOP_SEC))}",
-        f"Min score: {mdcode(REAL_MIN_SCORE)} | "
+        f"Min score: {mdcode(REAL_MIN_SCORE)} \\| "
         f"Min prob: {mdcode(fmt_prob(REAL_MIN_PROB))}",
     ])
 
@@ -755,7 +755,7 @@ def text_real_report() -> str:
         f"Network: {mdcode(SOLANA_NETWORK)} \\| "
         f"Enabled: {'✅' if s['enabled'] else '❌'}",
         "",
-        f"Open: {mdcode(s['open_positions'])} \| Closed: {mdcode(s['closed_positions'])}",
+        f"Open: {mdcode(s['open_positions'])} \\| Closed: {mdcode(s['closed_positions'])}",
         f"Avg P&L: {mdcode(fmt_pct(s['avg_pnl_pct'], 1, signed=True))}",
         "",
         mdbold("Open Positions:"),
