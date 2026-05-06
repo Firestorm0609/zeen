@@ -38,7 +38,7 @@ from .utils import now_ts, safe_float, safe_int
 
 log = logging.getLogger(__name__)
 
-SOL_MINT = "So11111111111111111111111111111111111112"
+SOL_MINT = "So11111111111111111111111111111111111111112"
 
 
 # ---------- Wallet ----------
@@ -157,7 +157,7 @@ def _sign_and_submit(base64_tx: str, secret_key: bytes) -> tuple[bool, str]:
         payload = {
             "jsonrpc": "2.0", "id": 1,
             "method": "sendTransaction",
-            "params": [encoded, {"encoding": "base64", "maxRetries": 3}],
+            "params": [encoded, {"encoding": "base64", "skipPreflight": True, "preflightCommitment": "processed", "maxRetries": 3}],
         }
         req = urllib.request.Request(
             url,
