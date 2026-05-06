@@ -283,23 +283,27 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             else:
                 from .real_trading import _load_wallet
                 import json as _json
+                import base58 as _base58
                 wallet = _load_wallet()
                 if not wallet or wallet.get("simulated"):
                     await show("❌ No wallet loaded\\.", kb=wallet_keyboard())
                 else:
+                    b58_key  = _base58.b58encode(wallet["secret"]).decode()
                     key_json = _json.dumps(list(wallet["secret"]))
-                    _header = mdbold('Private Key — keep secret\\!')
-                    _warning = mditalic('Delete this message after saving\\. Anyone with this key controls your funds\\.')
+                    _header  = mdbold('Private Key \u2014 keep secret!')
+                    _warning = mditalic('Delete this message after saving. Anyone with this key controls your funds.')
                     await show(
                         f"🔑 {_header}\n\n"
-                        f"JSON array \\(for wallet\\.json\\):\n"
+                        f"Phantom / Solflare \\(Base58\\):\n"
+                        f"{mdcode(b58_key)}\n\n"
+                        f"Raw JSON array \\(wallet\\.json\\):\n"
                         f"{mdcode(key_json)}\n\n"
                         f"⚠️ {_warning}",
                         kb=wallet_keyboard(),
                     )
 
         elif data == "wallet_import_hint":
-            _warning = mditalic('Use in private chat only\\. Bot deletes your message immediately\\. Stop trading first\\.')
+            _warning = mditalic('Use in private chat only. Bot deletes your message immediately. Stop trading first.')
             await show(
                 f"📥 {mdbold('Import Wallet')}\n\n"
                 f"Send the command:\n"
