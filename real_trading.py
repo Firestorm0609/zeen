@@ -96,6 +96,34 @@ async def get_wallet_sol_balance() -> float:
         return 0.0
 
 
+def get_real_db_balance() -> float:
+    """Return the DB-tracked SOL balance (updated on every open/close)."""
+    with closing(db_conn()) as conn:
+        r = conn.execute("SELECT balance_sol FROM real_wallet WHERE id=1").fetchone()
+        return safe_float(r["balance_sol"]) if r else 0.0
+
+
+async def sync_real_wallet_balance() -> float:
+    """Pull the live on-chain balance and write it to real_wallet.
+    Call this at startup (or after an external transfer) to re-anchor the
+    DB balance to reality.  Returns the new balance.
+    """
+    on_chain = await get_wallet_sol_balance()
+    if on_chain <= 0:
+        return get_real_db_balance()
+    ts = now_ts()
+    def _w():
+        with closing(db_conn()) as conn, conn:
+            conn.execute(
+                "UPDATE real_wallet SET balance_sol=?, starting_sol=CASE WHEN starting_sol=0 "
+                "THEN ? ELSE starting_sol END, updated_at=? WHERE id=1",
+                (on_chain, on_chain, ts),
+            )
+    db_write(_w)
+    log.info("real_wallet synced from chain: %.4f SOL", on_chain)
+    return on_chain
+
+
 # ---------- Jupiter swap ----------
 
 async def _jupiter_quote(
@@ -280,7 +308,21 @@ def init_real_trades_db() -> None:
                 ON real_trades(status);
             CREATE INDEX IF NOT EXISTS idx_real_trades_mint
                 ON real_trades(mint);
+
+            CREATE TABLE IF NOT EXISTS real_wallet (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                balance_sol REAL NOT NULL DEFAULT 0,
+                starting_sol REAL NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
         """)
+        # Seed real_wallet row if not present (balance will be synced from chain)
+        conn.execute(
+            "INSERT OR IGNORE INTO real_wallet(id, balance_sol, starting_sol, created_at, updated_at)"
+            " VALUES (1, 0.0, 0.0, ?, ?)",
+            (now_ts(), now_ts()),
+        )
 
 
 def get_open_real_trades() -> list[RealTrade]:
@@ -367,6 +409,43 @@ class RealTradingEngine:
         if last and (now_ts() - last) < REAL_MINT_COOLDOWN_SEC:
             return False, "mint cooldown"
 
+        # --- SOL balance check ---
+        from .db import get_state as _get_state
+        _size_str = _get_state("real_position_size_sol", "")
+        size_sol = float(_size_str) if _size_str else REAL_POSITION_SIZE_SOL
+        db_bal = get_real_db_balance()
+        if db_bal > 0 and db_bal < size_sol:
+            return False, f"insufficient SOL (have {db_bal:.4f}, need {size_sol:.4f})"
+
+        # --- Loss streak guard ---
+        with closing(db_conn()) as conn:
+            streak_rows = conn.execute(
+                "SELECT pnl_pct FROM real_trades WHERE status='CLOSED' "
+                "ORDER BY exit_time DESC LIMIT 5"
+            ).fetchall()
+        streak = 0
+        for r in streak_rows:
+            if safe_float(r["pnl_pct"]) < 0:
+                streak += 1
+            else:
+                break
+        if streak >= REAL_LOSS_STREAK_PAUSE:
+            return False, f"loss streak ({streak} consecutive losses)"
+
+        # --- Daily loss limit ---
+        cutoff = now_ts() - 86400
+        with closing(db_conn()) as conn:
+            daily_row = conn.execute(
+                "SELECT COALESCE(SUM(pnl_sol), 0) AS s FROM real_trades "
+                "WHERE status='CLOSED' AND exit_time >= ?",
+                (cutoff,),
+            ).fetchone()
+        daily_sol = safe_float(daily_row["s"]) if daily_row else 0.0
+        if daily_sol < 0 and db_bal > 0:
+            daily_loss_pct = abs(daily_sol) / db_bal * 100
+            if daily_loss_pct >= REAL_DAILY_LOSS_LIMIT_PCT:
+                return False, f"daily loss limit hit ({daily_loss_pct:.1f}%)"
+
         return True, "ok"
 
     async def open_trade(
@@ -406,22 +485,54 @@ class RealTradingEngine:
 
         ts = now_ts()
         def _w():
-            with closing(db_conn()) as conn, conn:
-                conn.execute("""
-                    INSERT INTO real_trades
-                        (mint, name, symbol, entry_time, entry_sol, entry_mc,
-                         position_size_sol, token_amount,
-                         entry_score, entry_prob,
-                         highest_mc, trailing_stop_price,
-                         dynamic_sl_pct, dynamic_tp_pct, dynamic_time_stop,
-                         status)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'OPEN')
-                """, (mint, name, symbol, ts, size_sol, mc,
-                       size_sol, token_amount,
-                       safe_int(result.get("score", 0)),
-                       safe_float(result.get("probability", 0)),
-                       mc, mc, sl, tp, time_sec))
-                return conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+            with closing(db_conn()) as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    # Re-check balance atomically before committing
+                    row = conn.execute(
+                        "SELECT balance_sol FROM real_wallet WHERE id=1"
+                    ).fetchone()
+                    current_bal = safe_float(row["balance_sol"]) if row else 0.0
+                    if current_bal > 0 and current_bal < size_sol:
+                        conn.execute("ROLLBACK")
+                        log.error("open_trade: insufficient SOL in real_wallet (%.4f < %.4f)",
+                                  current_bal, size_sol)
+                        return None
+
+                    conn.execute("""
+                        INSERT INTO real_trades
+                            (mint, name, symbol, entry_time, entry_sol, entry_mc,
+                             position_size_sol, token_amount,
+                             entry_score, entry_prob,
+                             highest_mc, trailing_stop_price,
+                             dynamic_sl_pct, dynamic_tp_pct, dynamic_time_stop,
+                             status)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'OPEN')
+                    """, (mint, name, symbol, ts, size_sol, mc,
+                           size_sol, token_amount,
+                           safe_int(result.get("score", 0)),
+                           safe_float(result.get("probability", 0)),
+                           mc, mc, sl, tp, time_sec))
+                    trade_id = conn.execute(
+                        "SELECT last_insert_rowid() AS id"
+                    ).fetchone()["id"]
+
+                    # Deduct the SOL spent (only if real_wallet has a non-zero balance)
+                    if current_bal > 0:
+                        conn.execute(
+                            "UPDATE real_wallet SET balance_sol=balance_sol-?, updated_at=? WHERE id=1",
+                            (size_sol, ts),
+                        )
+
+                    conn.execute("COMMIT")
+                    return trade_id
+                except Exception as e:
+                    try:
+                        conn.execute("ROLLBACK")
+                    except Exception:
+                        pass
+                    log.error("open_trade tx failed: %s", e)
+                    return None
         trade_id = db_write(_w)
         if not trade_id:
             return None
@@ -534,31 +645,52 @@ async def real_monitor_loop(bot=None) -> None:
                     if should_close:
                         # Execute sell: token -> SOL
                         wallet = _load_wallet()
+                        sol_received_actual = t.position_size_sol  # fallback: assume break-even
                         if wallet and not wallet.get("simulated") and t.token_amount > 0:
                             # token_amount is already stored as raw lamports (Jupiter outAmount)
                             raw_amount = int(t.token_amount)
                             ok, msg, sol_received = await swap_token_for_sol(
                                 session, t.mint, raw_amount, wallet)
                             if ok:
-                                sol_received_sol = sol_received / 1_000_000_000
-                                exit_mc = sol_received_sol / (t.position_size_sol or 1) * t.entry_mc
+                                sol_received_actual = sol_received / 1_000_000_000
+                                exit_mc = sol_received_actual / (t.position_size_sol or 1) * t.entry_mc
                             else:
                                 exit_mc = mc
                         else:
                             exit_mc = mc
+                            # simulated: estimate proceeds from MC-based pnl
+                            pnl_est = ((exit_mc - t.entry_mc) / t.entry_mc
+                                       if t.entry_mc > 0 else 0.0)
+                            sol_received_actual = t.position_size_sol * (1 + pnl_est)
 
                         pnl_pct = ((exit_mc - t.entry_mc) / t.entry_mc * 100
                                    if t.entry_mc > 0 else 0)
                         pnl_sol = t.position_size_sol * (pnl_pct / 100.0)
 
-                        def _close(tid=t.id, tmc=exit_mc, tp=pnl_pct, tsol=pnl_sol, r=reason):
-                            with closing(db_conn()) as conn, conn:
-                                conn.execute("""
-                                    UPDATE real_trades
-                                    SET exit_time=?, exit_mc=?, pnl_sol=?, pnl_pct=?,
-                                        reason=?, status='CLOSED'
-                                    WHERE id=? AND status='OPEN'
-                                """, (now_ts(), tmc, tsol, tp, r, tid))
+                        def _close(tid=t.id, tmc=exit_mc, tp=pnl_pct, tsol=pnl_sol,
+                                   r=reason, sol_in=sol_received_actual):
+                            with closing(db_conn()) as conn:
+                                try:
+                                    conn.execute("BEGIN IMMEDIATE")
+                                    conn.execute("""
+                                        UPDATE real_trades
+                                        SET exit_time=?, exit_mc=?, pnl_sol=?, pnl_pct=?,
+                                            reason=?, status='CLOSED'
+                                        WHERE id=? AND status='OPEN'
+                                    """, (now_ts(), tmc, tsol, tp, r, tid))
+                                    # Credit the SOL received back to the wallet
+                                    conn.execute(
+                                        "UPDATE real_wallet SET balance_sol=balance_sol+?, "
+                                        "updated_at=? WHERE id=1",
+                                        (sol_in, now_ts()),
+                                    )
+                                    conn.execute("COMMIT")
+                                except Exception as e:
+                                    try:
+                                        conn.execute("ROLLBACK")
+                                    except Exception:
+                                        pass
+                                    log.error("_close tx failed: %s", e)
                         db_write(_close)
 
                         log.info("REAL CLOSE | %s | %s | %+.1f%% (%+.3f SOL)",
