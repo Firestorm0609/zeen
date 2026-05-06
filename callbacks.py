@@ -310,6 +310,9 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 f"⚠️ {_warning}",
             )
 
+        elif data == "back":
+            await show(MENU_HEADER, kb=main_menu_keyboard())
+
         else:
             try:
                 await query.answer("Unknown action", show_alert=True)
