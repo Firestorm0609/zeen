@@ -87,12 +87,6 @@ def wallet_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton("🔙 Menu", callback_data="menu"),
-    ]])
-
-
 def threshold_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(str(i), callback_data=f"set_threshold_{i}")
