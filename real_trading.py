@@ -431,12 +431,15 @@ class RealTradingEngine:
 
         sol_lamports = int(size_sol * 1_000_000_000)
 
-        # Check on-chain balance before attempting swap
-        on_chain_bal = await get_wallet_sol_balance()
-        if on_chain_bal < size_sol:
-            log.error("open_trade: insufficient on-chain SOL (have %.4f, need %.4f)",
-                      on_chain_bal, size_sol)
-            return None
+        # Check on-chain balance before attempting swap (skip for simulated/devnet)
+        if not wallet.get("simulated"):
+            on_chain_bal = await get_wallet_sol_balance()
+            if on_chain_bal < size_sol:
+                log.error("open_trade: insufficient on-chain SOL (have %.4f, need %.4f)",
+                          on_chain_bal, size_sol)
+                return None
+        else:
+            on_chain_bal = size_sol  # devnet simulated: balance is irrelevant
 
         async with aiohttp.ClientSession() as session:
             ok, msg, token_amount = await swap_sol_for_token(
@@ -613,7 +616,11 @@ async def real_monitor_loop(bot=None) -> None:
 
                         pnl_pct = ((exit_mc - t.entry_mc) / t.entry_mc * 100
                                    if t.entry_mc > 0 else 0)
-                        pnl_sol = t.position_size_sol * (pnl_pct / 100.0)
+                        # For real swaps use actual SOL received; simulated uses MC estimate
+                        if wallet and not wallet.get("simulated"):
+                            pnl_sol = sol_received_actual - t.position_size_sol
+                        else:
+                            pnl_sol = t.position_size_sol * (pnl_pct / 100.0)
 
                         def _close(tid=t.id, tmc=exit_mc, tp=pnl_pct, tsol=pnl_sol,
                                    r=reason):
