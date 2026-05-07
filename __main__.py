@@ -37,7 +37,7 @@ from .state import BotState
 from .stream import get_active_tasks, stream
 from .real_trading import (
     init_real_trades_db, real_engine, real_monitor_loop,
-    maybe_open_real_trade, sync_real_wallet_balance,
+    maybe_open_real_trade,
 )
 from .utils import now_ts
 
@@ -85,7 +85,6 @@ async def run() -> None:
 
     # Real trading init
     init_real_trades_db()
-    await sync_real_wallet_balance()   # anchor DB balance to live on-chain value
     real_enabled = get_state("real_trading_enabled", "1") == "1"
     await real_engine.set_enabled(real_enabled)
 

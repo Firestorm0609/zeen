@@ -153,7 +153,7 @@ DEVNET_RPC_URL        = os.getenv("DEVNET_RPC_URL", "https://api.devnet.solana.c
 MAINNET_RPC_URL       = os.getenv("MAINNET_RPC_URL", "https://api.mainnet-beta.solana.com")
 
 # Position sizing for real trades
-REAL_POSITION_SIZE_SOL = _float("REAL_POSITION_SIZE_SOL", 0.1)  # SOL per trade
+REAL_POSITION_SIZE_SOL  = _float("REAL_POSITION_SIZE_SOL", 0.1)   # SOL per trade
 REAL_MAX_CONCURRENT    = _int("REAL_MAX_CONCURRENT", 3)
 REAL_MINT_COOLDOWN_SEC = _int("REAL_MINT_COOLDOWN_SEC", 30 * 60)
 
