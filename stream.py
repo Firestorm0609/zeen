@@ -16,6 +16,7 @@ from .market import MarketContext
 from .processor import process_coin
 from .scoring import ScoringEngine
 from .state import BotState
+from .storage import save_dead_letter
 from .utils import mdbold, mdcode
 
 log = logging.getLogger(__name__)

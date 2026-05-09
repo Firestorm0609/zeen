@@ -5,7 +5,7 @@ import threading
 from contextlib import closing
 from typing import Any, Callable
 
-from .config import DB_PATH, PAPER_STARTING_BALANCE_USD
+from .config import DB_PATH
 from .utils import now_ts
 
 log = logging.getLogger(__name__)
@@ -34,8 +34,7 @@ def init_db() -> None:
         CREATE TABLE IF NOT EXISTS chat_settings (
             chat_id INTEGER PRIMARY KEY,
             alerts_enabled INTEGER NOT NULL DEFAULT 0,
-            threshold INTEGER NOT NULL DEFAULT 7,
-            paper_reports_enabled INTEGER NOT NULL DEFAULT 0
+            threshold INTEGER NOT NULL DEFAULT 7
         );
 
         CREATE TABLE IF NOT EXISTS bot_state (
@@ -70,28 +69,6 @@ def init_db() -> None:
             created_at INTEGER NOT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS paper_trades (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            mint TEXT NOT NULL, name TEXT, symbol TEXT,
-            entry_time INTEGER NOT NULL, entry_mc REAL NOT NULL,
-            exit_time INTEGER, exit_mc REAL,
-            pnl_pct REAL, pnl_usd REAL, reason TEXT,
-            status TEXT NOT NULL, position_size_usd REAL NOT NULL,
-            entry_score INTEGER, entry_prob REAL,
-            highest_mc REAL, trailing_stop_price REAL,
-            dynamic_sl_pct REAL, dynamic_tp_pct REAL,
-            dynamic_time_stop INTEGER
-        );
-
-        CREATE TABLE IF NOT EXISTS paper_mc_snapshots (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            trade_id INTEGER NOT NULL,
-            mint TEXT NOT NULL,
-            market_cap REAL NOT NULL,
-            created_at INTEGER NOT NULL,
-            FOREIGN KEY(trade_id) REFERENCES paper_trades(id)
-        );
-
         CREATE TABLE IF NOT EXISTS lookbacks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             signal_id INTEGER NOT NULL,
@@ -111,14 +88,6 @@ def init_db() -> None:
             raw_data TEXT,
             error TEXT,
             created_at INTEGER NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS paper_wallet (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
-            balance_usd REAL NOT NULL,
-            starting_usd REAL NOT NULL,
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS pinned_alerts (
@@ -165,24 +134,14 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_signals_mint_time   ON signals(mint, created_at);
         CREATE INDEX IF NOT EXISTS idx_signals_created_at  ON signals(created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_prices_mint_time    ON price_snapshots(mint, created_at);
-        CREATE INDEX IF NOT EXISTS idx_trades_status       ON paper_trades(status);
-        CREATE INDEX IF NOT EXISTS idx_trades_mint         ON paper_trades(mint);
-        CREATE INDEX IF NOT EXISTS idx_trades_exit_time    ON paper_trades(exit_time DESC);
         CREATE INDEX IF NOT EXISTS idx_lookbacks_due       ON lookbacks(checked, check_at);
         CREATE INDEX IF NOT EXISTS idx_lookbacks_signal    ON lookbacks(signal_id);
-        CREATE INDEX IF NOT EXISTS idx_paper_snaps_trade   ON paper_mc_snapshots(trade_id);
-        CREATE INDEX IF NOT EXISTS idx_paper_snaps_mint    ON paper_mc_snapshots(mint, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_dead_letters_mint   ON dead_letters(mint);
         CREATE INDEX IF NOT EXISTS idx_dead_letters_time   ON dead_letters(created_at);
         CREATE INDEX IF NOT EXISTS idx_watchlist_chat      ON watchlist(chat_id);
         CREATE INDEX IF NOT EXISTS idx_watchlist_mint      ON watchlist(mint);
         CREATE INDEX IF NOT EXISTS idx_creator_history_creator ON creator_history(creator);
         """)
-
-        conn.execute("""
-            INSERT OR IGNORE INTO paper_wallet(id, balance_usd, starting_usd, created_at, updated_at)
-            VALUES (1, ?, ?, ?, ?)
-        """, (PAPER_STARTING_BALANCE_USD, PAPER_STARTING_BALANCE_USD, now_ts(), now_ts()))
 
         # Migrations
         for table, col, ddl in [
@@ -191,14 +150,6 @@ def init_db() -> None:
             ("signals",      "scoring_mode",   "TEXT"),
             ("dead_letters", "retry_count",    "INTEGER DEFAULT 0"),
             ("dead_letters", "last_retry_at",  "INTEGER"),
-            ("paper_trades", "entry_score",    "INTEGER"),
-            ("paper_trades", "entry_prob",     "REAL"),
-            ("paper_trades", "highest_mc",     "REAL"),
-            ("paper_trades", "trailing_stop_price", "REAL"),
-            ("paper_trades", "dynamic_sl_pct", "REAL"),
-            ("paper_trades", "dynamic_tp_pct", "REAL"),
-            ("paper_trades", "dynamic_time_stop", "INTEGER"),
-            ("chat_settings", "paper_reports_enabled", "INTEGER DEFAULT 0"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
@@ -209,28 +160,23 @@ def init_db() -> None:
 
 # ---- Convenience helpers ----
 
-def upsert_chat(chat_id: int, alerts_enabled=None, threshold=None,
-                paper_reports_enabled=None) -> None:
+def upsert_chat(chat_id: int, alerts_enabled=None, threshold=None) -> None:
     from .config import DEFAULT_THRESHOLD
 
     def _write():
         with closing(db_conn()) as conn, conn:
             conn.execute("""
-                INSERT INTO chat_settings(chat_id, alerts_enabled, threshold, paper_reports_enabled)
-                VALUES(?, ?, ?, ?)
+                INSERT INTO chat_settings(chat_id, alerts_enabled, threshold)
+                VALUES(?, ?, ?)
                 ON CONFLICT(chat_id) DO UPDATE SET
-                    alerts_enabled        = COALESCE(?, alerts_enabled),
-                    threshold             = COALESCE(?, threshold),
-                    paper_reports_enabled = COALESCE(?, paper_reports_enabled)
+                    alerts_enabled = COALESCE(?, alerts_enabled),
+                    threshold      = COALESCE(?, threshold)
             """, (
                 chat_id,
                 alerts_enabled if alerts_enabled is not None else 0,
                 threshold if threshold is not None else DEFAULT_THRESHOLD,
-                paper_reports_enabled if paper_reports_enabled is not None else 0,
-                # COALESCE args — None keeps the existing column value
                 alerts_enabled,
                 threshold,
-                paper_reports_enabled,
             ))
     db_write(_write)
 

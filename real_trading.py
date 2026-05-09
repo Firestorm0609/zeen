@@ -3,9 +3,7 @@
 Architecture:
   - Network-agnostic: SOLANA_NETWORK env var switches RPC + wallet context
   - Swap execution: Jupiter API v6 + solders signing
-  - DB table `real_trades` mirrors `paper_trades`
   - Network switching: set SOLANA_NETWORK="devnet" or "mainnet" in .env
-  - Safety gates mirror paper trading with stricter defaults
 """
 import asyncio
 import base64
@@ -580,15 +578,14 @@ async def real_monitor_loop(bot=None) -> None:
                     if mc <= t.entry_mc * (1.0 - sl_pct / 100.0):
                         should_close = True
                         reason = f"STOP_LOSS_{sl_pct:.1f}%"
+                    elif t.highest_mc > t.entry_mc and t.trailing_stop_price > 0 and mc <= t.trailing_stop_price:
+                        trail_pnl = ((t.trailing_stop_price - t.entry_mc)
+                                    / t.entry_mc) * 100.0
+                        should_close = True
+                        reason = f"TRAILING_STOP_{trail_pnl:+.1f}%"
                     elif mc >= t.entry_mc * (1.0 + tp_pct / 100.0):
                         should_close = True
                         reason = f"TAKE_PROFIT_{tp_pct:.1f}%"
-                    elif t.highest_mc > t.entry_mc and t.trailing_stop_price > 0:
-                        if mc <= t.trailing_stop_price:
-                            trail_pnl = ((t.trailing_stop_price - t.entry_mc)
-                                        / t.entry_mc) * 100.0
-                            should_close = True
-                            reason = f"TRAILING_STOP_{trail_pnl:+.1f}%"
                     elif age >= time_stop:
                         should_close = True
                         reason = f"TIME_STOP_{time_stop}s"

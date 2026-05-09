@@ -60,16 +60,6 @@ def save_snapshot(coin: dict) -> None:
     db_write(_w)
 
 
-def save_paper_snapshot(trade_id: int, mint: str, mc: float) -> None:
-    def _w():
-        with closing(db_conn()) as conn, conn:
-            conn.execute(
-                "INSERT INTO paper_mc_snapshots(trade_id,mint,market_cap,created_at) "
-                "VALUES(?,?,?,?)",
-                (trade_id, mint, mc, now_ts()))
-    db_write(_w)
-
-
 def _rotate_dead_letter_fallback() -> None:
     try:
         if os.path.exists(DEAD_LETTER_FALLBACK):
