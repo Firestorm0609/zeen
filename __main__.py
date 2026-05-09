@@ -37,7 +37,6 @@ from .state import BotState
 from .stream import get_active_tasks, stream
 from .real_trading import (
     init_real_trades_db, real_engine, real_monitor_loop,
-    maybe_open_real_trade,
 )
 from .utils import now_ts
 
