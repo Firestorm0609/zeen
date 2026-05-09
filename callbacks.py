@@ -38,7 +38,8 @@ async def _do_backtest() -> str:
     from .config import PUMP_THRESHOLD_PCT, RUG_THRESHOLD_PCT
     from .db import db_conn
     from collections import defaultdict
-    from .utils import closing, fmt_pct, fmt_usd, mdbold, mdcode, safe_float, safe_int
+    from contextlib import closing
+    from .utils import fmt_pct, fmt_usd, mdbold, mdcode, safe_float, safe_int
 
     with closing(db_conn()) as conn:
         rows = conn.execute("""

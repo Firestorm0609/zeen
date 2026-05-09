@@ -98,15 +98,6 @@ def init_db() -> None:
             PRIMARY KEY (chat_id, message_id)
         );
 
-        CREATE TABLE IF NOT EXISTS pinned_trades (
-            chat_id INTEGER NOT NULL,
-            message_id INTEGER NOT NULL,
-            trade_id INTEGER NOT NULL,
-            mint TEXT,
-            pinned_at INTEGER NOT NULL,
-            PRIMARY KEY (chat_id, message_id)
-        );
-
         CREATE TABLE IF NOT EXISTS creator_blacklist (
             creator TEXT PRIMARY KEY,
             reason TEXT,

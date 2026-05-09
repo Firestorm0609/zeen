@@ -9,7 +9,6 @@ import logging
 from contextlib import closing
 
 from .config import (
-    MAX_MARKET_CAP,
     REAL_STOP_LOSS_PCT, REAL_TAKE_PROFIT_PCT, REAL_TIME_STOP_SEC,
 )
 from .db import db_conn, db_write
