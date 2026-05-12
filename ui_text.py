@@ -631,7 +631,7 @@ async def text_wallet() -> str:
         f"◈  {mdbold('P&L Summary')}",
         f"  Closed    {mdcode(s['closed_positions'])}  "
         f"`{s['wins']}W` / `{s['losses']}L`",
-        f"  Win rate  `{_bar(s['win_rate']/100)}`  {mdcode(f'{s['win_rate']:.1f}%')}",
+        f"  Win rate  `{_bar(s['win_rate']/100)}`  {mdcode(f"{s['win_rate']:.1f}%")}",
         f"  Total P&L {_pnl_emoji(pnl)} {mdcode(f'{pnl:+.4f} SOL')}",
         f"  Max DD    " + mdcode(f"{s['max_drawdown_sol']:.4f} SOL") + "",
         "",
