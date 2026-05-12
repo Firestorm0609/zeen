@@ -160,12 +160,12 @@ async def get_wallet_sol_balance() -> float:
 
 async def _jupiter_quote(
     session: aiohttp.ClientSession,
-    input_mint: str, output_mint: str, amount: int, slippage_bps: int,
+    input_mint: str, output_mint: str, amount: int,
 ) -> Optional[dict]:
     url = (
         f"https://api.jup.ag/swap/v1/quote"
         f"?inputMint={input_mint}&outputMint={output_mint}"
-        f"&amount={amount}&slippageBps={slippage_bps}&onlyDirectRoutes=false"
+        f"&amount={amount}&autoSlippage=true&onlyDirectRoutes=false"
     )
     try:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
@@ -187,6 +187,7 @@ async def _jupiter_swap(
         "quoteResponse": quote,
         "userPublicKey": wallet_pubkey,
         "wrapUnwrapSOL": True,
+        "dynamicSlippage": True,
         "prioritizationFeeLamports": REAL_PRIORITY_FEE_LAMPORTS,
     }
     try:
@@ -322,9 +323,8 @@ async def execute_swap(
                     input_mint[:8], output_mint[:8], amount_lamports)
         return True, "simulated", amount_lamports * 0.9
 
-    slippage_bps = int(REAL_SLIPPAGE_PCT * 100)
     quote = await _jupiter_quote(
-        session, input_mint, output_mint, amount_lamports, slippage_bps)
+        session, input_mint, output_mint, amount_lamports)
     if not quote:
         return False, "no quote", 0.0
 
@@ -1089,4 +1089,4 @@ def real_stats() -> dict:
         "best_pnl_pct":     best,
         "worst_pnl_pct":    worst,
         "max_drawdown_sol": max_dd,
-    }
+      }
