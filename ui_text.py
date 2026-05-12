@@ -7,7 +7,7 @@ from .config import (
     DB_BACKUP_PATH, DB_PATH, DEAD_LETTER_MAX_RETRIES, LOG_PATH,
     MIN_TRAIN_SAMPLES, ML_LABEL_WINDOW, PUMP_FRONT,
     REAL_POSITION_SIZE_SOL, REAL_STOP_LOSS_PCT, REAL_TAKE_PROFIT_PCT,
-    REAL_TIME_STOP_SEC, REAL_FEE_PCT, REAL_SLIPPAGE_PCT,
+    REAL_TIME_STOP_SEC, REAL_FEE_PCT,
     SNAPSHOT_COUNT, STREAM_DEAD_ALERT_SEC,
 )
 from .db import db_conn, get_state
@@ -637,7 +637,7 @@ async def text_wallet() -> str:
         "",
         mditalic(
             f"Size {REAL_POSITION_SIZE_SOL} SOL/trade  ·  "
-            f"Fee {REAL_FEE_PCT}%  ·  Slippage {REAL_SLIPPAGE_PCT}%"
+            f"Fee {REAL_FEE_PCT}%  ·  Slippage Auto"
         ),
     ])
 
