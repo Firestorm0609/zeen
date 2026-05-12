@@ -84,7 +84,7 @@ async def run() -> None:
 
     # Real trading init
     init_real_trades_db()
-    real_enabled = get_state("real_trading_enabled", "1") == "1"
+    real_enabled = get_state("real_trading_enabled", "0") == "1"
     await real_engine.set_enabled(real_enabled)
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
