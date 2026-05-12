@@ -833,8 +833,8 @@ async def real_monitor_loop(bot=None) -> None:
                                 sol_received_actual = sol_received / 1_000_000_000
                                 exit_mc = sol_received_actual / (t.position_size_sol or 1) * t.entry_mc
                             else:
-                                log.error("Exit swap FAILED for %s: %s — marking FAILED_EXIT", t.mint[:8], msg)
-                                def _fail_exit(tid=t.id, emsg=str(msg)):
+                                log.error("Exit swap FAILED for %s: %s — marking FAILED_EXIT", t.mint[:8], exit_sig)
+                                def _fail_exit(tid=t.id, emsg=str(exit_sig)):
                                     with closing(db_conn()) as conn, conn:
                                         conn.execute(
                                             "UPDATE real_trades SET "
@@ -850,7 +850,7 @@ async def real_monitor_loop(bot=None) -> None:
                                             f"🚨 *EXIT SWAP FAILED*\n"
                                             f"🪙 {_esc(t.name or t.mint[:8], version=2)}\n"
                                             f"Trigger: `{_esc(reason, version=2)}`\n"
-                                            f"Error: `{_esc(str(msg)[:100], version=2)}`\n"
+                                            f"Error: `{_esc(str(exit_sig)[:100], version=2)}`\n"
                                             f"Status: `FAILED_EXIT` \u2014 check manually\\!"
                                         )
                                         _app = getattr(bot, "_application", None)
