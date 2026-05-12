@@ -41,6 +41,14 @@ log = logging.getLogger(__name__)
 
 SOL_MINT = "So11111111111111111111111111111111111111112"
 
+# Rate limiter: prevents simultaneous Jupiter API calls causing 429s
+_jupiter_lock = asyncio.Lock()
+_JUPITER_CALL_DELAY = 0.25  # seconds between Jupiter requests
+
+# Rate limiter: prevents simultaneous Jupiter API calls causing 429s
+_jupiter_lock = asyncio.Lock()
+_JUPITER_CALL_DELAY = 0.25  # seconds between Jupiter requests
+
 
 # ---------- Wallet ----------
 
@@ -167,16 +175,18 @@ async def _jupiter_quote(
         f"?inputMint={input_mint}&outputMint={output_mint}"
         f"&amount={amount}&autoSlippage=true&onlyDirectRoutes=false"
     )
-    try:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-            if resp.status != 200:
-                body = await resp.text()
-                log.warning("Jupiter quote HTTP %s | body: %s", resp.status, body[:300])
-                return None
-            return await resp.json()
-    except Exception as e:
-        log.warning("Jupiter quote: %s", e)
-        return None
+    async with _jupiter_lock:
+        await asyncio.sleep(_JUPITER_CALL_DELAY)
+        try:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status != 200:
+                    body = await resp.text()
+                    log.warning("Jupiter quote HTTP %s | body: %s", resp.status, body[:300])
+                    return None
+                return await resp.json()
+        except Exception as e:
+            log.warning("Jupiter quote: %s", e)
+            return None
 
 
 async def _jupiter_swap(
@@ -190,16 +200,18 @@ async def _jupiter_swap(
         "dynamicSlippage": True,
         "prioritizationFeeLamports": REAL_PRIORITY_FEE_LAMPORTS,
     }
-    try:
-        async with session.post(url, json=payload,
-                                timeout=aiohttp.ClientTimeout(total=30)) as resp:
-            if resp.status != 200:
-                log.warning("Jupiter swap HTTP %s", resp.status)
-                return None
-            return await resp.json()
-    except Exception as e:
-        log.warning("Jupiter swap: %s", e)
-        return None
+    async with _jupiter_lock:
+        await asyncio.sleep(_JUPITER_CALL_DELAY)
+        try:
+            async with session.post(url, json=payload,
+                                    timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                if resp.status != 200:
+                    log.warning("Jupiter swap HTTP %s", resp.status)
+                    return None
+                return await resp.json()
+        except Exception as e:
+            log.warning("Jupiter swap: %s", e)
+            return None
 
 
 def _sign_tx(base64_tx: str, secret_key: bytes) -> tuple[bool, str]:
