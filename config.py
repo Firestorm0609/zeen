@@ -124,7 +124,7 @@ RPC_RATE_PER_SEC      = _float("RPC_RATE_PER_SEC", 3.0)
 BUNDLE_SLOT_THRESHOLD = _int("BUNDLE_SLOT_THRESHOLD", 3)
 
 # ---------- Real Trading ----------
-REAL_TRADING_ENABLED    = _bool("REAL_TRADING_ENABLED", True)
+REAL_TRADING_ENABLED    = _bool("REAL_TRADING_ENABLED", False)
 SOLANA_NETWORK         = os.getenv("SOLANA_NETWORK", "devnet")  # "devnet" or "mainnet"
 
 # Wallet (keypair JSON file for devnet, can be swapped to mainnet wallet later)
@@ -156,6 +156,14 @@ REAL_LOSS_STREAK_PAUSE = _int("REAL_LOSS_STREAK_PAUSE", 3)
 
 # PumpSwap / Jupiter integration
 PUMPSWAP_API_URL     = os.getenv("PUMPSWAP_API_URL", "https://pumpportal.fun/api/swap")
+
+REAL_PRIORITY_FEE_LAMPORTS = _int("REAL_PRIORITY_FEE_LAMPORTS", 100_000)   # ~0.0001 SOL
+REAL_MAX_EXIT_RETRIES      = _int("REAL_MAX_EXIT_RETRIES", 5)               # max FAILED_EXIT retry attempts
+REAL_TX_CONFIRM_TIMEOUT    = _int("REAL_TX_CONFIRM_TIMEOUT", 45)            # seconds to wait for tx confirmation
+REAL_TX_CONFIRM_INTERVAL   = _int("REAL_TX_CONFIRM_INTERVAL", 3)            # seconds between confirmation polls
+REAL_MONITOR_INTERVAL_SEC  = _int("REAL_MONITOR_INTERVAL_SEC", 10)          # poll every 10s
+REAL_DAILY_SPEND_CAP_SOL   = _float("REAL_DAILY_SPEND_CAP_SOL", 2.0)       # max SOL deployed/day
+MAINNET_CONFIRMED          = _bool("MAINNET_CONFIRMED", False)               # must be True for mainnet
 
 # Confidence gating
 CONFIDENCE_GATE_STD = _float("CONFIDENCE_GATE_STD", 0.08)
