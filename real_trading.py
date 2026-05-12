@@ -760,7 +760,7 @@ async def maybe_open_real_trade(
     if ok:
         await real_engine.open_trade(coin, result, market_ctx, bot, state)
     else:
-        log.debug("REAL SKIP | %s | %s", (coin.get("mint") or "?")[:8], reason)
+        log.info("REAL SKIP | %s | %s", (coin.get("mint") or "?")[:8], reason)
 
 
 async def real_monitor_loop(bot=None) -> None:
@@ -1089,4 +1089,4 @@ def real_stats() -> dict:
         "best_pnl_pct":     best,
         "worst_pnl_pct":    worst,
         "max_drawdown_sol": max_dd,
-      }
+    }
