@@ -741,11 +741,15 @@ class RealTradingEngine:
         if bot and state:
             try:
                 from telegram.helpers import escape_markdown
+                score  = safe_float(result.get("score", 0))
+                prob   = safe_float(result.get("probability", 0))
                 text = (
                     f"⚡ *REAL TRADE OPENED* — {SOLANA_NETWORK.upper()}\n"
                     f"🪙 {escape_markdown(name or mint[:8], version=2)}\n"
-                    f"Size: `{size_sol} SOL`\n"
-                    f"SL: `{sl:.1f}%` \\| TP: `{tp:.1f}%` \\| Time: `{time_sec}s`"
+                    f"💰 Entry MC: `${mc:,.0f}`\n"
+                    f"⭐ Score: `{int(score)}/10` \\| ML Prob: `{prob:.0%}`\n"
+                    f"📦 Size: `{size_sol} SOL`\n"
+                    f"🛑 SL: `{sl:.1f}%` \\| 🎯 TP: `{tp:.1f}%` \\| ⏱ Time: `{time_sec}s`"
                 )
                 for cid in list(state.alerts.keys()):
                     try:
@@ -775,8 +779,9 @@ async def maybe_open_real_trade(
         log.info("REAL SKIP | %s | %s", (coin.get("mint") or "?")[:8], reason)
 
 
-async def real_monitor_loop(bot=None) -> None:
+async def real_monitor_loop(bot=None, state=None) -> None:
     """Monitor open real trades: check prices + execute exits."""
+    _notify_state = state
     while True:
         try:
             if not real_engine.enabled:
@@ -928,25 +933,21 @@ async def real_monitor_loop(bot=None) -> None:
                         log.info("REAL CLOSE | %s | %s | %+.1f%% (%+.3f SOL)",
                                  t.name or t.mint[:8], reason, pnl_pct, pnl_sol)
 
-                        if bot:
+                        if bot and _notify_state:
                             try:
-                                from .state import BotState  # avoid circular at module level
                                 from telegram.helpers import escape_markdown
                                 emoji = "🟢" if pnl_pct > 0 else "🔴"
+                                pnl_icon = "📈" if pnl_pct > 0 else "📉"
                                 text = (
                                     f"{emoji} *TRADE CLOSED* — {SOLANA_NETWORK.upper()}\n"
                                     f"🪙 {escape_markdown(t.name or t.mint[:8], version=2)}\n"
-                                    f"Reason: `{escape_markdown(reason, version=2)}`\n"
-                                    f"P&L: `{pnl_pct:+.1f}%` \\(`{pnl_sol:+.4f} SOL`\\)"
+                                    f"💰 Entry MC: `${t.entry_mc:,.0f}`\n"
+                                    f"📊 Exit MC: `${exit_mc:,.0f}`\n"
+                                    f"🏔 Peak MC: `${t.highest_mc:,.0f}`\n"
+                                    f"🏁 Reason: `{escape_markdown(reason, version=2)}`\n"
+                                    f"{pnl_icon} P&L: `{pnl_pct:+.1f}%` \\(`{pnl_sol:+.4f} SOL`\\)"
                                 )
-                                # Pull alert chat IDs from app bot_data if available
-                                app = getattr(bot, "_application", None)
-                                alert_chats: list[int] = []
-                                if app and hasattr(app, "bot_data"):
-                                    st = app.bot_data.get("state")
-                                    if st:
-                                        alert_chats = list(st.alerts.keys())
-                                for cid in alert_chats:
+                                for cid in list(_notify_state.alerts.keys()):
                                     try:
                                         await bot.send_message(
                                             chat_id=cid, text=text,
