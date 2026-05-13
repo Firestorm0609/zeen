@@ -166,6 +166,42 @@ async def get_wallet_sol_balance() -> float:
 
 # ---------- Jupiter swap ----------
 
+async def _get_token_balance_async(
+    session: aiohttp.ClientSession, pubkey: str, mint: str
+) -> int:
+    """Fetch actual on-chain SPL token balance in raw units. Returns 0 on failure."""
+    url = _get_rpc_url()
+    try:
+        async with session.post(
+            url,
+            json={"jsonrpc": "2.0", "id": 1,
+                  "method": "getTokenAccountsByOwner",
+                  "params": [pubkey, {"mint": mint},
+                             {"encoding": "jsonParsed"}]},
+            timeout=aiohttp.ClientTimeout(total=5),
+            headers={"Content-Type": "application/json"},
+        ) as resp:
+            if resp.status != 200:
+                return 0
+            data = await resp.json()
+            accounts = (data.get("result") or {}).get("value", [])
+            if not accounts:
+                return 0
+            amount = (
+                accounts[0]
+                .get("account", {})
+                .get("data", {})
+                .get("parsed", {})
+                .get("info", {})
+                .get("tokenAmount", {})
+                .get("amount", "0")
+            )
+            return int(amount)
+    except Exception as e:
+        log.debug("_get_token_balance_async %s: %s", mint[:8], e)
+        return 0
+
+
 async def _jupiter_quote(
     session: aiohttp.ClientSession,
     input_mint: str, output_mint: str, amount: int,
@@ -829,10 +865,12 @@ async def real_monitor_loop(bot=None, state=None) -> None:
                         wallet = _load_wallet()
                         sol_received_actual = t.position_size_sol  # fallback: assume break-even
                         if wallet and not wallet.get("simulated") and t.token_amount > 0:
-                            # Normalise to raw integer units using stored decimals
-                            # Jupiter outAmount is already in raw units; no conversion needed,
-                            # but we guard against float precision drift
-                            raw_amount = int(round(t.token_amount))
+                            # Fetch actual on-chain balance to sell everything, avoiding dust
+                            raw_amount = await _get_token_balance_async(
+                                session, wallet["pubkey"], t.mint)
+                            if raw_amount == 0:
+                                raw_amount = int(round(t.token_amount))
+                                log.debug("on-chain balance fetch failed, using stored amount")
                             ok, exit_sig, sol_received = await swap_token_for_sol(
                                 session, t.mint, raw_amount, wallet)
                             if ok:
