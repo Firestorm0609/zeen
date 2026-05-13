@@ -590,18 +590,7 @@ class RealTradingEngine:
         if daily_spent + size_sol > REAL_DAILY_SPEND_CAP_SOL:
             return False, f"daily spend cap hit ({daily_spent:.3f}/{REAL_DAILY_SPEND_CAP_SOL} SOL)"
 
-        # --- REAL_MAX_POSITION_PCT: async balance check (non-blocking) ---
-        _wallet = _load_wallet()
-        if _wallet and not _wallet.get("simulated"):
-            _bal = await _get_sol_balance_async(_wallet["pubkey"])
-            if _bal > 0:
-                _max_sol = _bal * (REAL_MAX_POSITION_PCT / 100.0)
-                if size_sol > _max_sol:
-                    return False, (
-                        f"position {size_sol:.3f} SOL exceeds "
-                        f"{REAL_MAX_POSITION_PCT:.0f}% of wallet "
-                        f"({_max_sol:.3f} SOL / {_bal:.3f} total)"
-                    )
+        # --- REAL_MAX_POSITION_PCT: disabled (position size managed via REAL_POSITION_SIZE_SOL) ---
 
         streak = 0
         for r in streak_rows:
