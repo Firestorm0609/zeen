@@ -160,7 +160,7 @@ async def run() -> None:
             asyncio.create_task(
                 watchlist_monitor_loop(app.bot),         name="watchlist_monitor"),
             asyncio.create_task(
-                real_monitor_loop(app.bot),            name="real_monitor"),
+                real_monitor_loop(app.bot, state),     name="real_monitor"),
             # blacklist_refresh_loop removed: BlacklistCache already auto-refreshes
             # via its internal TTL on every lookup — a separate loop was redundant.
         ]
