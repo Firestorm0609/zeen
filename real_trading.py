@@ -26,7 +26,7 @@ from .config import (
     REAL_PRIORITY_FEE_LAMPORTS, REAL_MONITOR_INTERVAL_SEC,
     REAL_DAILY_SPEND_CAP_SOL, MAINNET_CONFIRMED, REAL_MAX_EXIT_RETRIES,
     REAL_TX_CONFIRM_TIMEOUT, REAL_TX_CONFIRM_INTERVAL,
-    REAL_MIN_SCORE, REAL_MIN_PROB,
+    REAL_MIN_SCORE, REAL_MIN_PROB, REAL_MIN_MCAP, REAL_MAX_MCAP,
     REAL_POSITION_SIZE_SOL, REAL_SLIPPAGE_PCT,
     REAL_STOP_LOSS_PCT, REAL_TAKE_PROFIT_PCT,
     REAL_TIME_STOP_SEC, SOLANA_NETWORK, SOLANA_WALLET_PATH,
@@ -583,6 +583,11 @@ class RealTradingEngine:
         mc = safe_float(coin.get("usd_market_cap"))
         if mc <= 0:
             return False, "invalid mc"
+
+        if REAL_MIN_MCAP > 0 and mc < REAL_MIN_MCAP:
+            return False, f"mcap ${mc:,.0f} below min ${REAL_MIN_MCAP:,.0f}"
+        if REAL_MAX_MCAP > 0 and mc > REAL_MAX_MCAP:
+            return False, f"mcap ${mc:,.0f} above max ${REAL_MAX_MCAP:,.0f}"
 
         creator = (coin.get("creator") or coin.get("user")
                    or coin.get("traderPublicKey") or "")
