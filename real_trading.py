@@ -26,7 +26,7 @@ from .config import (
     REAL_PRIORITY_FEE_LAMPORTS, REAL_MONITOR_INTERVAL_SEC,
     REAL_DAILY_SPEND_CAP_SOL, MAINNET_CONFIRMED, REAL_MAX_EXIT_RETRIES,
     REAL_TX_CONFIRM_TIMEOUT, REAL_TX_CONFIRM_INTERVAL,
-    REAL_MIN_SCORE, REAL_MIN_PROB, REAL_MIN_MCAP, REAL_MAX_MCAP,
+    REAL_MIN_SCORE, REAL_MIN_PROB, REAL_MIN_MCAP, REAL_MAX_MCAP, REAL_MIN_TP_PROFIT_PCT,
     REAL_POSITION_SIZE_SOL, REAL_SLIPPAGE_PCT,
     REAL_STOP_LOSS_PCT, REAL_TAKE_PROFIT_PCT,
     REAL_TIME_STOP_SEC, SOLANA_NETWORK, SOLANA_WALLET_PATH,
@@ -876,6 +876,22 @@ async def real_monitor_loop(bot=None, state=None) -> None:
                             if raw_amount == 0:
                                 raw_amount = int(round(t.token_amount))
                                 log.debug("on-chain balance fetch failed, using stored amount")
+
+                            # For TP exits: check quote first — if price has already dumped
+                            # below minimum profit threshold, skip this cycle and wait
+                            if "TAKE_PROFIT" in reason and raw_amount > 0:
+                                _pre_quote = await _jupiter_quote(
+                                    session, t.mint, SOL_MINT, raw_amount)
+                                if _pre_quote:
+                                    _expected_sol = int(_pre_quote.get("outAmount", 0)) / 1_000_000_000
+                                    _quote_pnl = (_expected_sol - t.position_size_sol) / (t.position_size_sol or 1) * 100
+                                    if _quote_pnl < REAL_MIN_TP_PROFIT_PCT:
+                                        log.info(
+                                            "TP quote check: %.1f%% profit < min %.1f%% — price dumped, skipping cycle | %s",
+                                            _quote_pnl, REAL_MIN_TP_PROFIT_PCT, t.mint[:8])
+                                        should_close = False
+                                        continue
+
                             ok, exit_sig, sol_received = await swap_token_for_sol(
                                 session, t.mint, raw_amount, wallet)
                             if ok:
