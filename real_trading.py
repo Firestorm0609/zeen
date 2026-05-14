@@ -997,9 +997,14 @@ async def real_monitor_loop(bot=None, state=None) -> None:
                     for t in failed:
                         mc = await fetch_coin_mc(session, t.mint)
                         exit_mc = mc if mc else t.entry_mc
-                        raw_amount = int(round(t.token_amount))
                         ok, msg, sol_received = (False, "no wallet", 0.0)
-                        if wallet and not wallet.get("simulated") and raw_amount > 0:
+                        if wallet and not wallet.get("simulated") and t.token_amount > 0:
+                            # Fetch actual on-chain balance to avoid dust on retry
+                            raw_amount = await _get_token_balance_async(
+                                session, wallet["pubkey"], t.mint)
+                            if raw_amount == 0:
+                                raw_amount = int(round(t.token_amount))
+                                log.debug("retry: on-chain balance fetch failed, using stored amount")
                             ok, msg, sol_received = await swap_token_for_sol(
                                 session, t.mint, raw_amount, wallet)
 
