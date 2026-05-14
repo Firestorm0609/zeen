@@ -694,6 +694,14 @@ class RealTradingEngine:
                 session, mint, sol_lamports, wallet)
             token_decimals = await fetch_token_decimals(mint) if ok else 6
         msg = tx_sig  # preserve for error reporting
+        if ok:
+            # Fetch actual on-chain MC at swap confirmation time for accurate entry_mc
+            async with aiohttp.ClientSession() as _mc_session:
+                confirmed_mc = await fetch_coin_mc(_mc_session, mint)
+            if confirmed_mc and confirmed_mc > 0:
+                log.info("Entry MC updated: signal=$%,.0f confirmed=$%,.0f | %s",
+                         mc, confirmed_mc, mint[:8])
+                mc = confirmed_mc
         if not ok:
             log.error("Real swap failed: %s", msg)
             if bot and state:
@@ -896,7 +904,9 @@ async def real_monitor_loop(bot=None, state=None) -> None:
                                 session, t.mint, raw_amount, wallet)
                             if ok:
                                 sol_received_actual = sol_received / 1_000_000_000
-                                exit_mc = sol_received_actual / (t.position_size_sol or 1) * t.entry_mc
+                                # Fetch actual on-chain MC at exit confirmation time
+                                confirmed_exit_mc = await fetch_coin_mc(session, t.mint)
+                                exit_mc = confirmed_exit_mc if confirmed_exit_mc and confirmed_exit_mc > 0                                     else sol_received_actual / (t.position_size_sol or 1) * t.entry_mc
                             else:
                                 log.error("Exit swap FAILED for %s: %s — marking FAILED_EXIT", t.mint[:8], exit_sig)
                                 def _fail_exit(tid=t.id, emsg=str(exit_sig)):
