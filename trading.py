@@ -78,7 +78,7 @@ def compute_dynamic_exit_params(
 
     # --- TP: high confidence → wider ---
     tp = base_tp * (1.0 + 0.8 * confidence) * mc_factor * engagement_factor
-    tp = max(base_tp * 0.5, min(base_tp * 2.5, tp))
+    tp = max(base_tp * 0.75, min(base_tp * 2.5, tp))  # floor: 60% at base 80
 
     # --- Time stop: more time for high engagement + high confidence ---
     time_mult = (1.0 + 0.5 * confidence) * mc_factor * engagement_factor
