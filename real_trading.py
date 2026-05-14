@@ -1125,6 +1125,16 @@ async def real_monitor_loop(bot=None, state=None) -> None:
                             if t.failed_exit_attempts + 1 >= REAL_MAX_EXIT_RETRIES:
                                 log.error("FAILED_EXIT max retries hit for %s — manual action required",
                                           t.mint[:8])
+                                # Mark ABANDONED so the trade leaves FAILED_EXIT and is
+                                # counted as a loss in real_stats() instead of disappearing.
+                                def _abandon(tid=t.id, emsg=str(msg)):
+                                    with closing(db_conn()) as conn, conn:
+                                        conn.execute(
+                                            "UPDATE real_trades "
+                                            "SET status='ABANDONED', exit_error=? "
+                                            "WHERE id=? AND status='FAILED_EXIT'",
+                                            (emsg[:500], tid))
+                                db_write(_abandon)
                                 if bot:
                                     try:
                                         from telegram.helpers import escape_markdown as _esc
@@ -1158,7 +1168,7 @@ async def real_monitor_loop(bot=None, state=None) -> None:
 def real_stats() -> dict:
     with closing(db_conn()) as conn:
         closed = conn.execute(
-            "SELECT pnl_pct, pnl_sol FROM real_trades WHERE status='CLOSED' "
+            "SELECT pnl_pct, pnl_sol FROM real_trades WHERE status IN ('CLOSED','ABANDONED') "
             "ORDER BY exit_time DESC LIMIT 1000"
         ).fetchall()
         open_n = conn.execute(
