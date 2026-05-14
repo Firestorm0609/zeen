@@ -661,7 +661,7 @@ class RealTradingEngine:
 
         sl, tp, time_sec = compute_dynamic_exit_params(coin, result, market_ctx)
         sl = max(REAL_STOP_LOSS_PCT * 0.5, min(REAL_STOP_LOSS_PCT * 1.5, sl))
-        tp = max(REAL_TAKE_PROFIT_PCT * 0.5, min(REAL_TAKE_PROFIT_PCT * 2.5, tp))
+        tp = max(REAL_TAKE_PROFIT_PCT * 0.75, min(REAL_TAKE_PROFIT_PCT * 2.5, tp))  # floor: 60% at base 80
         time_sec = max(300, min(4 * 3600, time_sec))
 
         from .db import get_state
