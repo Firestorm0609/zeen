@@ -205,11 +205,17 @@ async def _get_token_balance_async(
 async def _jupiter_quote(
     session: aiohttp.ClientSession,
     input_mint: str, output_mint: str, amount: int,
+    slippage_bps: int = 2000,
 ) -> Optional[dict]:
+    # autoSlippage is intentionally omitted here: the swap body uses
+    # dynamicSlippage + maxAutoSlippageBps, which overrides the quote's
+    # slippage anyway.  Specifying both causes them to fight each other
+    # and can produce a tighter tolerance than intended, triggering
+    # on-chain error 6001 (SlippageToleranceExceeded).
     url = (
         f"https://api.jup.ag/swap/v1/quote"
         f"?inputMint={input_mint}&outputMint={output_mint}"
-        f"&amount={amount}&autoSlippage=true&onlyDirectRoutes=false"
+        f"&amount={amount}&slippageBps={slippage_bps}&onlyDirectRoutes=false"
     )
     async with _jupiter_lock:
         await asyncio.sleep(_JUPITER_CALL_DELAY)
@@ -234,6 +240,10 @@ async def _jupiter_swap(
         "userPublicKey": wallet_pubkey,
         "wrapUnwrapSOL": True,
         "dynamicSlippage": True,
+        # Give dynamic slippage enough headroom for thin-liquidity pump.fun tokens.
+        # Without this ceiling Jupiter may compute a tolerance below what micro-cap
+        # price movement requires, causing on-chain error 6001.
+        "maxAutoSlippageBps": 2000,   # 20 % ceiling
         "prioritizationFeeLamports": REAL_PRIORITY_FEE_LAMPORTS,
     }
     async with _jupiter_lock:
@@ -365,39 +375,57 @@ async def execute_swap(
 
     Returns (success, tx_signature_or_error, output_amount).
     On devnet without a real wallet, runs in simulation mode.
+
+    Automatically retries once with higher slippage on on-chain error 6001
+    (SlippageToleranceExceeded), which is common on low-liquidity pump.fun tokens.
     """
     if wallet.get("simulated"):
         log.warning("SIMULATED swap: %s -> %s amount=%s (no wallet)",
                     input_mint[:8], output_mint[:8], amount_lamports)
         return True, "simulated", amount_lamports * 0.9
 
-    quote = await _jupiter_quote(
-        session, input_mint, output_mint, amount_lamports)
-    if not quote:
-        return False, "no quote", 0.0
+    # Attempt 1: normal slippage (2000 bps = 20 %)
+    # Attempt 2: elevated slippage (3000 bps = 30 %) on 6001 retry
+    for attempt, slippage_bps in enumerate([2000, 3000], start=1):
+        if attempt > 1:
+            log.warning("Retrying swap with elevated slippage (%d bps) after 6001", slippage_bps)
 
-    swap_data = await _jupiter_swap(session, quote, wallet["pubkey"])
-    if not swap_data:
-        return False, "swap tx build failed", 0.0
+        quote = await _jupiter_quote(
+            session, input_mint, output_mint, amount_lamports,
+            slippage_bps=slippage_bps)
+        if not quote:
+            return False, "no quote", 0.0
 
-    tx_b64 = swap_data.get("swapTransaction")
-    if not tx_b64:
-        log.error("Jupiter response missing swapTransaction")
-        return False, "no swapTransaction", 0.0
+        swap_data = await _jupiter_swap(session, quote, wallet["pubkey"])
+        if not swap_data:
+            return False, "swap tx build failed", 0.0
 
-    ok, signed_b64 = _sign_tx(tx_b64, wallet["secret"])
-    if not ok:
-        log.error("TX signing failed: %s", signed_b64)
-        return False, signed_b64, 0.0
+        tx_b64 = swap_data.get("swapTransaction")
+        if not tx_b64:
+            log.error("Jupiter response missing swapTransaction")
+            return False, "no swapTransaction", 0.0
 
-    confirmed, sig_or_err = await _submit_and_confirm(session, signed_b64)
-    if not confirmed:
+        ok, signed_b64 = _sign_tx(tx_b64, wallet["secret"])
+        if not ok:
+            log.error("TX signing failed: %s", signed_b64)
+            return False, signed_b64, 0.0
+
+        confirmed, sig_or_err = await _submit_and_confirm(session, signed_b64)
+        if confirmed:
+            out_amount = float(quote.get("outAmount", 0))
+            log.info("Swap confirmed | tx: %s | outAmount: %s", sig_or_err, out_amount)
+            return True, sig_or_err, out_amount
+
+        # On 6001 (SlippageToleranceExceeded) retry with wider slippage
+        if attempt == 1 and "6001" in str(sig_or_err):
+            log.warning("Swap hit SlippageToleranceExceeded (6001) — will retry")
+            continue
+
         log.error("TX not confirmed: %s", sig_or_err)
         return False, sig_or_err, 0.0
 
-    out_amount = float(quote.get("outAmount", 0))
-    log.info("Swap confirmed | tx: %s | outAmount: %s", sig_or_err, out_amount)
-    return True, sig_or_err, out_amount
+    # Should not reach here, but be safe
+    return False, "swap failed after slippage retry", 0.0
 
 
 async def swap_sol_for_token(
