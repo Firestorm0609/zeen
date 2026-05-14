@@ -147,6 +147,8 @@ REAL_SLIPPAGE_PCT      = _float("REAL_SLIPPAGE_PCT", 5.0)  # Higher slippage for
 REAL_FEE_PCT           = _float("REAL_FEE_PCT", 1.0)
 
 # Safety gates
+REAL_MIN_MCAP          = _float("REAL_MIN_MCAP", 0.0)        # Min market cap in USD (0 = no limit)
+REAL_MAX_MCAP          = _float("REAL_MAX_MCAP", 0.0)        # Max market cap in USD (0 = no limit)
 REAL_MIN_SCORE         = _int("REAL_MIN_SCORE", 8)
 REAL_MIN_PROB          = _float("REAL_MIN_PROB", 0.75)
 REAL_CONFIDENCE_GATE_STD = _float("REAL_CONFIDENCE_GATE_STD", 0.05)
