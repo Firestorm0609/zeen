@@ -246,18 +246,24 @@ async def cmd_last(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"🕐 Opened: {mdcode(fmt_duration(now_ts() - int(row['entry_time'])))} ago",
         ]
     else:
-        pnl_pct = float(row["pnl_pct"] or 0)
-        pnl_sol = float(row["pnl_sol"] or 0)
-        reason  = row["reason"] or ""
-        arrow   = "📈" if pnl_pct >= 0 else "📉"
+        pnl_pct  = float(row["pnl_pct"] or 0)
+        pnl_sol  = float(row["pnl_sol"] or 0)
+        reason   = row["reason"] or ""
+        arrow    = "📈" if pnl_pct >= 0 else "📉"
+        # exit_time is NULL for FAILED_EXIT / ABANDONED trades
+        exit_time = row["exit_time"]
+        closed_ago = (
+            mdcode(fmt_duration(now_ts() - int(exit_time))) + " ago"
+            if exit_time else mdcode(status)
+        )
         lines = [
-            f"{arrow} {mdbold('LATEST REAL TRADE — CLOSED')}",
+            f"{arrow} {mdbold('LATEST REAL TRADE')} — {mdcode(status)}",
             f"{mdbold(name)} \\({mdcode('$' + symbol)}\\)",
             "",
             f"{arrow} P&L: {mdcode(f'{pnl_pct:+.1f}%')}  "
             f"\\({mdcode(f'{pnl_sol:+.4f} SOL')}\\)",
             f"📌 Reason: {mdcode(reason)}",
-            f"🕐 Closed: {mdcode(fmt_duration(now_ts() - int(row['exit_time'])))} ago",
+            f"🕐 Closed: {closed_ago}",
         ]
 
     if mint:
@@ -554,8 +560,7 @@ async def cmd_real_balance(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     lines = [
         f"💰 {mdbold('Wallet Balance')}",
         f"Network: {mdcode(SOLANA_NETWORK)}",
-        f"SOL Balance: {mdcode(fmt_usd(bal * 180, 2))} "
-        f"({mdcode(f'{bal:.4f} SOL')})",
+        f"SOL Balance: {mdcode(f'{bal:.4f} SOL')}  \\(USD price not fetched\\)",
         "",
         mditalic(f"Wallet file: {SOLANA_WALLET_PATH}"),
     ]

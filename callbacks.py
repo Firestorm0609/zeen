@@ -34,7 +34,6 @@ PM = "MarkdownV2"
 
 async def _do_backtest() -> str:
     """Run backtest and return formatted text."""
-    from .commands import query_top_performers, format_top_performers
     from .config import PUMP_THRESHOLD_PCT, RUG_THRESHOLD_PCT
     from .db import db_conn
     from collections import defaultdict

@@ -898,16 +898,19 @@ def text_last_trade() -> str:
             f"  🔗 [pump\\.fun]({PUMP_FRONT}/{mint})" if mint else "",
         ]))
     else:
-        arrow   = "📈" if pnl_pct >= 0 else "📉"
-        age     = fmt_duration(now_ts() - int(row["exit_time"]))
-        ex_sig  = row["exit_tx_signature"] or ""
+        arrow    = "📈" if pnl_pct >= 0 else "📉"
+        exit_time = row["exit_time"]
+        # exit_time is NULL for FAILED_EXIT / ABANDONED trades
+        age      = (fmt_duration(now_ts() - int(exit_time)) + " ago"
+                    if exit_time else mdcode(status))
+        ex_sig   = row["exit_tx_signature"] or ""
         short_ex = f"{ex_sig[:8]}…" if ex_sig else "?"
-        dur     = fmt_duration(
-            int(row["exit_time"]) - int(row["entry_time"])
-        ) if row["exit_time"] and row["entry_time"] else "?"
+        dur      = fmt_duration(
+            int(exit_time) - int(row["entry_time"])
+        ) if exit_time and row["entry_time"] else "?"
 
         return "\n".join(filter(None, [
-            f"{arrow}  {mdbold('Latest Trade — CLOSED')}",
+            f"{arrow}  {mdbold('Latest Trade')} — {mdcode(status)}",
             f"`{_DIV}`",
             f"  {mdbold(name)}  `${symbol}`",
             "",
