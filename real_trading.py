@@ -27,7 +27,7 @@ from .config import (
     REAL_DAILY_SPEND_CAP_SOL, MAINNET_CONFIRMED, REAL_MAX_EXIT_RETRIES,
     REAL_TX_CONFIRM_TIMEOUT, REAL_TX_CONFIRM_INTERVAL,
     REAL_MIN_SCORE, REAL_MIN_PROB, REAL_MIN_MCAP, REAL_MAX_MCAP, REAL_MIN_TP_PROFIT_PCT,
-    REAL_POSITION_SIZE_SOL, REAL_SLIPPAGE_PCT,
+    REAL_POSITION_SIZE_SOL,
     REAL_STOP_LOSS_PCT, REAL_TAKE_PROFIT_PCT,
     REAL_TIME_STOP_SEC, SOLANA_NETWORK, SOLANA_WALLET_PATH,
 )
@@ -40,10 +40,6 @@ from .utils import now_ts, safe_float, safe_int
 log = logging.getLogger(__name__)
 
 SOL_MINT = "So11111111111111111111111111111111111111112"
-
-# Rate limiter: prevents simultaneous Jupiter API calls causing 429s
-_jupiter_lock = asyncio.Lock()
-_JUPITER_CALL_DELAY = 0.25  # seconds between Jupiter requests
 
 # Rate limiter: prevents simultaneous Jupiter API calls causing 429s
 _jupiter_lock = asyncio.Lock()
@@ -641,12 +637,12 @@ class RealTradingEngine:
                 "WHERE entry_time >= ?", (cutoff,),
             ).fetchone()
             streak_rows = conn.execute(
-                "SELECT pnl_pct FROM real_trades WHERE status='CLOSED' "
+                "SELECT pnl_pct FROM real_trades WHERE status IN ('CLOSED','ABANDONED') "
                 "ORDER BY exit_time DESC LIMIT 5"
             ).fetchall()
             daily_row = conn.execute(
                 "SELECT COALESCE(SUM(pnl_sol), 0) AS s FROM real_trades "
-                "WHERE status='CLOSED' AND exit_time >= ?", (cutoff,),
+                "WHERE status IN ('CLOSED','ABANDONED') AND exit_time >= ?", (cutoff,),
             ).fetchone()
 
         if n >= REAL_MAX_CONCURRENT:
@@ -905,6 +901,11 @@ async def real_monitor_loop(bot=None, state=None) -> None:
                         # Execute sell: token -> SOL
                         wallet = _load_wallet()
                         sol_received_actual = t.position_size_sol  # fallback: assume break-even
+                        # Initialise so the _close closure can always reference them safely,
+                        # even when the simulated/zero-token branch is taken and
+                        # swap_token_for_sol is never called (prevents NameError).
+                        ok = False
+                        exit_sig = ""
                         if wallet and not wallet.get("simulated") and t.token_amount > 0:
                             # Fetch actual on-chain balance to sell everything, avoiding dust
                             raw_amount = await _get_token_balance_async(
