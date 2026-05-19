@@ -573,47 +573,68 @@ async def cmd_real_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 def text_score_stats() -> str:
-    """Pure text builder for score-tier stats — usable from both command and callback."""
+    """Score-tier accuracy across ALL signals ever recorded — shows real model quality.
+
+    Uses the 4hr lookback window (same window the ML model trains on) to determine
+    whether each signal did well (MOON/PUMP/UP = ≥10% gain) or didn't (STALE/DOWN/RUG).
+    Also shows signals still pending an outcome.
+    """
     with closing(db_conn()) as conn:
         rows = conn.execute("""
             SELECT
-                entry_score,
-                COUNT(*)                                        AS trades,
-                SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END)  AS wins,
-                SUM(CASE WHEN pnl_pct <= 0 THEN 1 ELSE 0 END) AS losses,
-                AVG(pnl_pct)                                    AS avg_pnl_pct,
-                SUM(pnl_sol)                                    AS total_sol,
-                MAX(pnl_pct)                                    AS best_pct,
-                MIN(pnl_pct)                                    AS worst_pct
-            FROM real_trades
-            WHERE status IN ('CLOSED', 'ABANDONED')
-              AND entry_score IS NOT NULL
-            GROUP BY entry_score
-            ORDER BY entry_score DESC
+                s.score,
+                COUNT(DISTINCT s.id)                                               AS total,
+                SUM(CASE WHEN lb.outcome IN ('MOON','PUMP','UP')  THEN 1 ELSE 0 END) AS did_well,
+                SUM(CASE WHEN lb.outcome IN ('STALE','DOWN','RUG') THEN 1 ELSE 0 END) AS did_not,
+                SUM(CASE WHEN lb.outcome = 'MOON'  THEN 1 ELSE 0 END)              AS moon,
+                SUM(CASE WHEN lb.outcome = 'PUMP'  THEN 1 ELSE 0 END)              AS pump,
+                SUM(CASE WHEN lb.outcome = 'UP'    THEN 1 ELSE 0 END)              AS up,
+                SUM(CASE WHEN lb.outcome = 'STALE' THEN 1 ELSE 0 END)              AS stale,
+                SUM(CASE WHEN lb.outcome = 'DOWN'  THEN 1 ELSE 0 END)              AS down,
+                SUM(CASE WHEN lb.outcome = 'RUG'   THEN 1 ELSE 0 END)              AS rug,
+                AVG(CASE WHEN lb.checked = 1 THEN lb.pct_change END)               AS avg_pct
+            FROM signals s
+            LEFT JOIN lookbacks lb
+                   ON lb.signal_id = s.id
+                  AND lb.window_label = '4hr'
+                  AND lb.checked      = 1
+            WHERE s.score IS NOT NULL
+            GROUP BY s.score
+            ORDER BY s.score DESC
         """).fetchall()
 
     if not rows:
-        return "📊 No closed trades with score data yet\."
+        return "📊 No signals recorded yet\."
 
-    lines = [f"📊 {mdbold('Performance by Score Tier')}\n"]
+    lines = [
+        f"📊 {mdbold('Model Signal Accuracy')}",
+        mditalic("All signals ever recorded, 4hr outcome window"),
+        "",
+    ]
     for r in rows:
-        score     = int(r["entry_score"])
-        trades    = int(r["trades"])
-        wins      = int(r["wins"])
-        winrate   = wins / trades * 100 if trades else 0
-        avg_pnl   = float(r["avg_pnl_pct"] or 0)
-        total_sol = float(r["total_sol"] or 0)
-        best      = float(r["best_pct"] or 0)
-        worst     = float(r["worst_pct"] or 0)
-        stars     = "⭐" * min(score, 5)
-        arrow     = "📈" if avg_pnl >= 0 else "📉"
+        score    = int(r["score"])
+        total    = int(r["total"])
+        did_well = int(r["did_well"] or 0)
+        did_not  = int(r["did_not"]  or 0)
+        moon     = int(r["moon"]  or 0)
+        pump     = int(r["pump"]  or 0)
+        up       = int(r["up"]    or 0)
+        stale    = int(r["stale"] or 0)
+        down     = int(r["down"]  or 0)
+        rug      = int(r["rug"]   or 0)
+        pending  = total - did_well - did_not
+        avg_pct  = float(r["avg_pct"] or 0)
+        success  = did_well / (did_well + did_not) * 100 if (did_well + did_not) > 0 else 0
+
         lines += [
-            f"{stars} {mdbold(f'Score {score}/10')}",
-            f"  Trades: {mdcode(str(trades))}  Wins: {mdcode(str(wins))}  "
-            f"WR: {mdcode(f'{winrate:.0f}%')}",
-            f"  {arrow} Avg P&L: {mdcode(f'{avg_pnl:+.1f}%')}  "
-            f"Total: {mdcode(f'{total_sol:+.3f} SOL')}",
-            f"  Best: {mdcode(f'{best:+.1f}%')}  Worst: {mdcode(f'{worst:+.1f}%')}",
+            f"{mdbold(f'{score}/10')} — {mdcode(f'{total:,} signals')}  "
+            f"\\({mdcode(f'{success:.0f}%')} success rate\\)",
+            f"  ✅ Did well:  {mdbold(str(did_well))}  "
+            f"— 🌙 {moon}  🚀 {pump}  📈 {up}",
+            f"  ❌ Did not:   {mdbold(str(did_not))}  "
+            f"— ➡️ {stale}  📉 {down}  💀 {rug}",
+            f"  ⏳ Pending:  {pending}  "
+            f"  Avg 4hr: {mdcode(f'{avg_pct:+.1f}%' if (did_well+did_not) else 'n/a')}",
             "",
         ]
     return "\n".join(lines)
