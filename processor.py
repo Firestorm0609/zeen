@@ -8,6 +8,7 @@ from telegram import Bot
 from .alerts import send_alert
 from .config import (
     MAX_CONCURRENT_PROCESS, MAX_MARKET_CAP, MIN_MARKET_CAP,
+    MIN_CREATOR_WALLET_AGE_DAYS, MAX_VOLUME_MC_RATIO,
 )
 from .market import MarketContext
 from .scoring import ScoringEngine
@@ -49,6 +50,25 @@ def hard_filter(coin: dict) -> tuple[bool, str]:
     if mc > MAX_MARKET_CAP: return False, "above max MC"
     if not any([coin.get("twitter"), coin.get("telegram"), coin.get("website")]):
         return False, "no socials"
+
+    # Suggestion 8: bundled launch — multiple wallets transacted in the same slot
+    bundle_score = coin.get("_rpc_bundle_score")
+    if bundle_score is not None and bundle_score >= 1.0:
+        return False, "bundled launch detected"
+
+    # Suggestion 10: volume/MC ratio — if explicit 5m volume already exceeds
+    # MAX_VOLUME_MC_RATIO of market cap the token has been heavily churned.
+    # We only use volume_5m here — never the generic "volume" key, which may
+    # be 24h volume and would produce a far too aggressive filter.
+    volume_5m = safe_float(coin.get("volume_5m") or 0)
+    if mc > 0 and volume_5m > 0 and volume_5m / mc > MAX_VOLUME_MC_RATIO:
+        return False, f"vol/MC too high ({volume_5m/mc:.0%})"
+
+    # Suggestion 11: creator wallet age — brand-new wallets are a strong rug signal
+    wallet_age = coin.get("_rpc_creator_wallet_age_days")
+    if wallet_age is not None and wallet_age < MIN_CREATOR_WALLET_AGE_DAYS:
+        return False, f"creator wallet too young ({wallet_age:.1f}d)"
+
     return True, "ok"
 
 

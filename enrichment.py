@@ -36,6 +36,7 @@ def _normalize_pumpportal(data: dict) -> dict:
         "usd_market_cap":    0,
         "created_timestamp": data.get("created_timestamp"),
         "creator":           data.get("creator") or data.get("traderPublicKey") or "",
+        "volume_5m":         data.get("volume_5m") or data.get("volume", 0) or 0,
     }
 
 
@@ -204,24 +205,40 @@ async def rpc_bundle_score(
         return None
 
 
-async def rpc_creator_tx_count(
+async def rpc_creator_wallet_info(
     session: aiohttp.ClientSession, creator: str,
-) -> Optional[int]:
+) -> tuple[Optional[int], Optional[float]]:
+    """Return (tx_count_in_sample, wallet_age_days).
+
+    Signatures are returned newest-first; the last entry is the oldest tx
+    in our 200-tx sample window.  If the wallet has ≤200 txs this is the
+    true age; if it has more we get a lower bound (wallet is *at least*
+    this old) — either way sufficient to flag brand-new wallets.
+    """
     if not creator:
-        return None
+        return None, None
     result, err = await _rpc_post(
         session, "getSignaturesForAddress",
         [creator, {"limit": 200, "commitment": "confirmed"}],
     )
     if err or result is None:
-        log.debug("rpc_creator_tx_count %s: %s", creator[:8], err)
-        return None
+        log.debug("rpc_creator_wallet_info %s: %s", creator[:8], err)
+        return None, None
     try:
         sigs = result if isinstance(result, list) else []
-        return len(sigs)
+        tx_count = len(sigs)
+        if not sigs:
+            return 0, None
+        # Last entry is oldest tx in the sample window
+        oldest_block_time = sigs[-1].get("blockTime")
+        age_days = (
+            (now_ts() - oldest_block_time) / 86_400.0
+            if oldest_block_time else None
+        )
+        return tx_count, age_days
     except Exception as e:
-        log.debug("rpc_creator_tx_count parse %s: %s", creator[:8], e)
-        return None
+        log.debug("rpc_creator_wallet_info parse %s: %s", creator[:8], e)
+        return None, None
 
 
 async def enrich_with_rpc(coin: dict, session: aiohttp.ClientSession) -> dict:
@@ -239,7 +256,7 @@ async def enrich_with_rpc(coin: dict, session: aiohttp.ClientSession) -> dict:
             rpc_mint_authorities(session, mint),
             rpc_top_holder_concentration(session, mint),
             rpc_bundle_score(session, mint),
-            rpc_creator_tx_count(session, creator),
+            rpc_creator_wallet_info(session, creator),
             return_exceptions=True,
         )
 
@@ -250,8 +267,12 @@ async def enrich_with_rpc(coin: dict, session: aiohttp.ClientSession) -> dict:
             coin["_rpc_top5_concentration"] = float(conc_result)
         if isinstance(bundle_result, (int, float)):
             coin["_rpc_bundle_score"] = float(bundle_result)
-        if isinstance(hist_result, int):
-            coin["_rpc_creator_tx_count"] = hist_result
+        if isinstance(hist_result, tuple):
+            tx_count, age_days = hist_result
+            if isinstance(tx_count, int):
+                coin["_rpc_creator_tx_count"] = tx_count
+            if isinstance(age_days, (int, float)):
+                coin["_rpc_creator_wallet_age_days"] = float(age_days)
 
         log.debug(
             "RPC enriched %s | mint_auth=%s freeze=%s top5=%s bundle=%s creator_txs=%s",

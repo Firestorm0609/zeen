@@ -25,7 +25,7 @@ from .ui_text import (
     text_last_trade,
 )
 from .utils import mdbold, mdcode, mditalic, strip_md2
-from .commands import do_train
+from .commands import do_train, text_score_stats, handle_plain_text, cmd_watch, cmd_score
 from .real_trading import real_engine, SOLANA_NETWORK, REAL_POSITION_SIZE_SOL
 
 log = logging.getLogger(__name__)
@@ -224,6 +224,59 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await show(f"❌ {mdbold('Real trading OFF')}")
         elif data == "real_status": await show(text_real_status(engine))
         elif data == "real_report": await show(text_real_report())
+        elif data == "score_stats": await show(text_score_stats())
+
+        # ── Quick actions from auto-detected mint (handle_plain_text) ───────
+        elif data.startswith("qs_score_"):
+            mint = data[len("qs_score_"):]
+            ctx.args = [mint]
+            await cmd_score(update, ctx)
+
+        elif data.startswith("qs_watch_"):
+            mint = data[len("qs_watch_"):]
+            ctx.args = [mint]
+            await cmd_watch(update, ctx)
+
+        elif data.startswith("qs_bl_"):
+            mint = data[len("qs_bl_"):]
+            from contextlib import closing
+            from .db import db_conn as _dbc, db_write as _dbw
+            from .state import blacklist_cache as _blc
+            from .utils import now_ts as _nts
+            with closing(_dbc()) as _conn:
+                row = _conn.execute(
+                    "SELECT creator FROM signals WHERE mint=? AND creator IS NOT NULL "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (mint,),
+                ).fetchone()
+            if not row or not row["creator"]:
+                await show(f"❌ No creator found for {mdcode(mint[:8])}\\. Score it first to populate the DB\.")
+            else:
+                creator = row["creator"]
+                def _bl(c=creator):
+                    with closing(_dbc()) as _c, _c:
+                        _c.execute(
+                            "INSERT OR REPLACE INTO creator_blacklist"
+                            "(creator,reason,added_at,auto_added) VALUES(?,?,?,0)",
+                            (c, "manual via quick action", _nts()))
+                _dbw(_bl)
+                _blc.invalidate()
+                await show(f"🚫 Blacklisted creator {mdcode(creator[:12])} for mint {mdcode(mint[:8])}")
+
+        # ── Pending: score / watch triggered from inline prompts ────────────
+        elif data == "prompt_watch":
+            ctx.user_data["pending"] = "watch"
+            await show(
+                f"👁 {mdbold('Paste a mint address to watch')}\n\n"
+                f"Just send the mint address as a plain message\."
+            )
+
+        elif data == "prompt_score":
+            ctx.user_data["pending"] = "score_mint"
+            await show(
+                f"🔍 {mdbold('Paste a mint address to score')}\n\n"
+                f"Just send the mint address as a plain message\."
+            )
         elif data == "trade_size_menu":
             current = float(get_state("real_position_size_sol") or REAL_POSITION_SIZE_SOL)
             await show(
@@ -249,10 +302,11 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
 
         elif data == "size_custom_hint":
+            ctx.user_data["pending"] = "trade_size"
             await show(
                 f"✏️ {mdbold('Custom Trade Size')}\n\n"
-                f"Use the command: {mdcode('/trade_size 0.3')}\n"
-                f"Min: {mdcode('0.01 SOL')} | Max: {mdcode('10.0 SOL')}",
+                f"Just type a SOL amount now — no slash command needed\n"
+                f"Min: {mdcode('0.01')} | Max: {mdcode('10.0')}",
             )
 
         elif data == "wallet_menu":
@@ -303,15 +357,18 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     )
 
         elif data == "wallet_import_hint":
-            _warning = mditalic('Use in private chat only. Bot deletes your message immediately. Stop trading first.')
+            if update.effective_chat.type != "private":
+                await show(
+                    f"⚠️ {mdbold('Private chat only')}\n\n"
+                    f"Open a private chat with the bot, then paste your key directly\.",
+                )
+                return
+            ctx.user_data["pending"] = "import_wallet"
             await show(
-                f"📥 {mdbold('Import Wallet')}\n\n"
-                f"Send the command:\n"
-                f"{mdcode('/import_wallet <private_key>')}\n\n"
-                f"Accepts:\n"
-                f"• Base58 encoded private key\n"
-                f"• 64\\-byte JSON array\n\n"
-                f"⚠️ {_warning}",
+                f"📥 {mdbold('Paste your private key now')}\n\n"
+                f"Just send your key as a plain message \\(no slash command\\)\n"
+                f"Accepts base58 or 64\\-byte JSON array\n\n"
+                + mditalic('The bot will delete your message immediately\\.'),
             )
 
         elif data == "back":

@@ -6,6 +6,7 @@ import sys
 
 from telegram.ext import (
     ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes,
+    MessageHandler, filters,
 )
 
 from .background import (
@@ -25,7 +26,8 @@ from .commands import (
     cmd_stats, cmd_top, cmd_train, cmd_unwatch, cmd_watch, cmd_watchlist,
     cmd_last,
     cmd_real_on, cmd_real_off, cmd_real_status,
-    cmd_real_balance, cmd_real_report,
+    cmd_real_balance, cmd_real_report, cmd_score_stats,
+    handle_plain_text,
     cmd_trade_size, cmd_import_wallet,
 )
 from .keywords import KeywordModel
@@ -124,6 +126,7 @@ async def run() -> None:
         ("real_status",    cmd_real_status),
         ("real_balance",   cmd_real_balance),
         ("real_report",    cmd_real_report),
+        ("score_stats",    cmd_score_stats),
         ("trade_size",     cmd_trade_size),
         ("import_wallet",  cmd_import_wallet),
     ]
@@ -131,6 +134,8 @@ async def run() -> None:
         app.add_handler(CommandHandler(name, fn))
 
     app.add_handler(CallbackQueryHandler(handle_callback))
+    # Catches plain text so users can paste keys/mints/amounts without slash commands
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_plain_text))
     app.add_error_handler(error_handler)
 
     background_tasks: list[asyncio.Task] = []

@@ -39,7 +39,12 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("📊 Real Status",  callback_data="real_status"),
-            InlineKeyboardButton("📑 Real Report", callback_data="real_report"),
+            InlineKeyboardButton("📑 Real Report",  callback_data="real_report"),
+            InlineKeyboardButton("🏅 Score Stats",  callback_data="score_stats"),
+        ],
+        [
+            InlineKeyboardButton("🔍 Score Token",  callback_data="prompt_score"),
+            InlineKeyboardButton("👁 Watch Token",  callback_data="prompt_watch"),
         ],
         [InlineKeyboardButton("⚙️ More…", callback_data="more")],
         [InlineKeyboardButton("✖ Close", callback_data="close_menu")],

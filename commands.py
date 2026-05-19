@@ -572,6 +572,59 @@ async def cmd_real_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await _reply(update, text_trading_report())
 
 
+def text_score_stats() -> str:
+    """Pure text builder for score-tier stats — usable from both command and callback."""
+    with closing(db_conn()) as conn:
+        rows = conn.execute("""
+            SELECT
+                entry_score,
+                COUNT(*)                                        AS trades,
+                SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END)  AS wins,
+                SUM(CASE WHEN pnl_pct <= 0 THEN 1 ELSE 0 END) AS losses,
+                AVG(pnl_pct)                                    AS avg_pnl_pct,
+                SUM(pnl_sol)                                    AS total_sol,
+                MAX(pnl_pct)                                    AS best_pct,
+                MIN(pnl_pct)                                    AS worst_pct
+            FROM real_trades
+            WHERE status IN ('CLOSED', 'ABANDONED')
+              AND entry_score IS NOT NULL
+            GROUP BY entry_score
+            ORDER BY entry_score DESC
+        """).fetchall()
+
+    if not rows:
+        return "📊 No closed trades with score data yet\."
+
+    lines = [f"📊 {mdbold('Performance by Score Tier')}\n"]
+    for r in rows:
+        score     = int(r["entry_score"])
+        trades    = int(r["trades"])
+        wins      = int(r["wins"])
+        winrate   = wins / trades * 100 if trades else 0
+        avg_pnl   = float(r["avg_pnl_pct"] or 0)
+        total_sol = float(r["total_sol"] or 0)
+        best      = float(r["best_pct"] or 0)
+        worst     = float(r["worst_pct"] or 0)
+        stars     = "⭐" * min(score, 5)
+        arrow     = "📈" if avg_pnl >= 0 else "📉"
+        lines += [
+            f"{stars} {mdbold(f'Score {score}/10')}",
+            f"  Trades: {mdcode(str(trades))}  Wins: {mdcode(str(wins))}  "
+            f"WR: {mdcode(f'{winrate:.0f}%')}",
+            f"  {arrow} Avg P&L: {mdcode(f'{avg_pnl:+.1f}%')}  "
+            f"Total: {mdcode(f'{total_sol:+.3f} SOL')}",
+            f"  Best: {mdcode(f'{best:+.1f}%')}  Worst: {mdcode(f'{worst:+.1f}%')}",
+            "",
+        ]
+    return "\n".join(lines)
+
+
+async def cmd_score_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Show win-rate and P&L broken down by entry score tier."""
+    if not await _check_allowed(update): return
+    await _reply(update, text_score_stats())
+
+
 async def cmd_trade_size(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Set trade size: /trade_size 0.25"""
     if not await _check_allowed(update): return
@@ -667,3 +720,153 @@ async def cmd_import_wallet(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"Network: {mdcode(SOLANA_NETWORK.upper())}\n\n"
         + mditalic('Old wallet backed up to wallet\\.json\\.bak')
     )
+
+
+# ---------------------------------------------------------------------------
+# Plain-text message handler — no slash needed
+# ---------------------------------------------------------------------------
+
+def _looks_like_private_key(text: str) -> bool:
+    """True if text looks like a base58 private key (87-88 chars) or 64-int JSON array."""
+    t = text.strip()
+    if t.startswith("["):
+        try:
+            import json as _j
+            arr = _j.loads(t)
+            return isinstance(arr, list) and len(arr) == 64
+        except Exception:
+            return False
+    import re
+    return bool(re.match(r"^[1-9A-HJ-NP-Za-km-z]{80,90}$", t))
+
+
+def _looks_like_mint(text: str) -> bool:
+    """True if text looks like a Solana mint address (base58, 32-44 chars, no spaces)."""
+    import re
+    return bool(re.match(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$", text.strip()))
+
+
+async def _import_wallet_from_text(update: Update, raw: str) -> None:
+    """Parse raw key text and save wallet — shared by auto-detect and pending flows."""
+    import json as _j, os, shutil
+    secret_bytes = None
+
+    try:
+        arr = _j.loads(raw)
+        if isinstance(arr, list) and len(arr) == 64:
+            secret_bytes = bytes(arr)
+    except Exception:
+        pass
+
+    if secret_bytes is None:
+        try:
+            import base58 as _b58
+            decoded = _b58.b58decode(raw)
+            if len(decoded) == 64:
+                secret_bytes = decoded
+        except Exception:
+            pass
+
+    if secret_bytes is None:
+        await _reply(update, "❌ Couldn't parse that key\. Send a base58 string or 64\-byte JSON array\.")
+        return
+
+    try:
+        from solders.keypair import Keypair
+        kp     = Keypair.from_bytes(secret_bytes)
+        pubkey = str(kp.pubkey())
+    except Exception as e:
+        await _reply(update, f"❌ Invalid keypair: {mdcode(str(e))}")
+        return
+
+    wallet_path = SOLANA_WALLET_PATH
+    if os.path.exists(wallet_path):
+        shutil.copy(wallet_path, wallet_path + ".bak")
+    with open(wallet_path, "w") as f:
+        _j.dump(list(secret_bytes), f)
+
+    await _reply(update,
+        f"✅ {mdbold('Wallet imported')}\n\n"
+        f"Address: {mdcode(pubkey)}\n"
+        f"Network: {mdcode(SOLANA_NETWORK.upper())}\n\n"
+        + mditalic("Old wallet backed up to wallet\\.json\\.bak")
+    )
+
+
+async def handle_plain_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Routes plain-text messages so users never need to type slash commands for input.
+
+    Handles:
+    • Pending action set by a button press (import_wallet, trade_size, watch, score_mint)
+    • Auto-detection of private keys  → wallet import (private chat only)
+    • Auto-detection of mint addresses → quick score / watch / blacklist menu
+    """
+    if not update.message or not update.message.text:
+        return
+    if not await _check_allowed(update):
+        return
+
+    text      = update.message.text.strip()
+    is_private = update.effective_chat.type == "private"
+    pending    = ctx.user_data.pop("pending", None)
+
+    # ── Pending: wallet import ──────────────────────────────────────────────
+    if pending == "import_wallet" or (pending is None and is_private and _looks_like_private_key(text)):
+        if not is_private:
+            await _reply(update, "⚠️ Wallet import only works in a private chat for security\.")
+            return
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
+        await _import_wallet_from_text(update, text)
+        return
+
+    # ── Pending: custom trade size ──────────────────────────────────────────
+    if pending == "trade_size":
+        from .db import set_state as _ss
+        try:
+            val = float(text.replace(",", "."))
+        except ValueError:
+            await _reply(update, f"❌ That doesn't look like a number\\. Example: {mdcode('0.05')}")
+            return
+        if not 0.01 <= val <= 10.0:
+            await _reply(update, f"❌ Must be between {mdcode('0.01')} and {mdcode('10.0')} SOL\\.")
+            return
+        _ss("real_position_size_sol", str(val))
+        await _reply(update, f"✅ Trade size set to {mdcode(f'{val} SOL')} per trade")
+        return
+
+    # ── Pending: watch a mint ───────────────────────────────────────────────
+    if pending == "watch":
+        if not _looks_like_mint(text):
+            await _reply(update, "❌ That doesn't look like a valid mint address\.")
+            return
+        ctx.args = [text]
+        await cmd_watch(update, ctx)
+        return
+
+    # ── Pending: score a mint ───────────────────────────────────────────────
+    if pending == "score_mint":
+        if not _looks_like_mint(text):
+            await _reply(update, "❌ That doesn't look like a valid mint address\.")
+            return
+        ctx.args = [text]
+        await cmd_score(update, ctx)
+        return
+
+    # ── Auto-detect mint address → quick action buttons ─────────────────────
+    if _looks_like_mint(text):
+        mint = text
+        kb = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🔍 Score",    callback_data=f"qs_score_{mint}"),
+                InlineKeyboardButton("👁 Watch",    callback_data=f"qs_watch_{mint}"),
+                InlineKeyboardButton("🚫 Blacklist", callback_data=f"qs_bl_{mint}"),
+            ]
+        ])
+        await _reply(update,
+            f"📋 Mint: {mdcode(mint[:8])} — what would you like to do?",
+            kb=kb,
+        )
+        return

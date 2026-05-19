@@ -121,7 +121,9 @@ SOLANA_RPC_URL        = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.so
 RPC_ENABLED           = _bool("RPC_ENABLED", True)
 RPC_TIMEOUT_SEC       = _int("RPC_TIMEOUT_SEC", 8)
 RPC_RATE_PER_SEC      = _float("RPC_RATE_PER_SEC", 3.0)
-BUNDLE_SLOT_THRESHOLD = _int("BUNDLE_SLOT_THRESHOLD", 3)
+BUNDLE_SLOT_THRESHOLD        = _int("BUNDLE_SLOT_THRESHOLD",        3)
+MIN_CREATOR_WALLET_AGE_DAYS  = _int("MIN_CREATOR_WALLET_AGE_DAYS",  7)    # wallets younger than this are flagged
+MAX_VOLUME_MC_RATIO          = _float("MAX_VOLUME_MC_RATIO",          0.5)  # block if 5m-vol > 50% of MC
 
 # ---------- Real Trading ----------
 REAL_TRADING_ENABLED    = _bool("REAL_TRADING_ENABLED", False)
