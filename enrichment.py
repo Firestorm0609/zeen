@@ -36,7 +36,7 @@ def _normalize_pumpportal(data: dict) -> dict:
         "usd_market_cap":    0,
         "created_timestamp": data.get("created_timestamp"),
         "creator":           data.get("creator") or data.get("traderPublicKey") or "",
-        "volume_5m":         data.get("volume_5m") or data.get("volume", 0) or 0,
+        "volume_5m":         data.get("volume_5m") or 0,  # only use explicit 5m field — never fall back to 24h volume
     }
 
 
