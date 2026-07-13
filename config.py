@@ -148,6 +148,20 @@ REAL_TIME_STOP_SEC     = _int("REAL_TIME_STOP_SEC", 4 * 60 * 60)
 REAL_SLIPPAGE_PCT      = _float("REAL_SLIPPAGE_PCT", 5.0)  # Higher slippage for real trades
 REAL_FEE_PCT           = _float("REAL_FEE_PCT", 1.0)
 
+# ---------- Partial take-profit ladder ----------
+# Rationale (backtest, Jul 2026): TAKE_PROFIT exits were only capturing ~14%
+# of the peak run-up on average, and TRAILING_STOP/STOP_LOSS exits were
+# firing so late that price had already round-tripped below entry (negative
+# capture). A partial exit locks in real profit early instead of waiting
+# for one big all-or-nothing target that most "pump then rug" coins never
+# reach before dumping.
+REAL_PARTIAL_TP_ENABLED       = _bool("REAL_PARTIAL_TP_ENABLED", True)
+REAL_PARTIAL_TP_TRIGGER_PCT   = _float("REAL_PARTIAL_TP_TRIGGER_PCT", 20.0)  # take partial at +20% MC gain
+REAL_PARTIAL_TP_SELL_PCT      = _float("REAL_PARTIAL_TP_SELL_PCT", 50.0)    # sell this % of position
+# After the partial sells, remaining "house money" position trails tighter
+# than the original stop, so a fast reversal can't erase the locked-in gain.
+REAL_POST_PARTIAL_TRAIL_PCT   = _float("REAL_POST_PARTIAL_TRAIL_PCT", 12.0)
+
 # Safety gates
 REAL_MIN_TP_PROFIT_PCT  = _float("REAL_MIN_TP_PROFIT_PCT", 15.0) # Min actual profit % to accept on TP exit
 REAL_MIN_MCAP          = _float("REAL_MIN_MCAP", 0.0)        # Min market cap in USD (0 = no limit)
@@ -166,7 +180,10 @@ REAL_PRIORITY_FEE_LAMPORTS = _int("REAL_PRIORITY_FEE_LAMPORTS", 100_000)   # ~0.
 REAL_MAX_EXIT_RETRIES      = _int("REAL_MAX_EXIT_RETRIES", 5)               # max FAILED_EXIT retry attempts
 REAL_TX_CONFIRM_TIMEOUT    = _int("REAL_TX_CONFIRM_TIMEOUT", 45)            # seconds to wait for tx confirmation
 REAL_TX_CONFIRM_INTERVAL   = _int("REAL_TX_CONFIRM_INTERVAL", 3)            # seconds between confirmation polls
-REAL_MONITOR_INTERVAL_SEC  = _int("REAL_MONITOR_INTERVAL_SEC", 10)          # poll every 10s
+# Lowered from 10s: backtest showed trailing/stop exits reacting too slowly
+# relative to how fast these coins reverse. 5s is the fastest interval that
+# still respects the Jupiter rate limiter without risking 429s.
+REAL_MONITOR_INTERVAL_SEC  = _int("REAL_MONITOR_INTERVAL_SEC", 5)
 REAL_DAILY_SPEND_CAP_SOL   = _float("REAL_DAILY_SPEND_CAP_SOL", 2.0)       # max SOL deployed/day
 MAINNET_CONFIRMED          = _bool("MAINNET_CONFIRMED", False)               # must be True for mainnet
 
@@ -185,5 +202,3 @@ except ImportError:
 ALLOWED_CHAT_IDS = set(
     int(x) for x in os.getenv("ALLOWED_CHAT_IDS", "").split(",") if x.strip()
 )
-
-
