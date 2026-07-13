@@ -153,12 +153,33 @@ async def rpc_mint_authorities(
 async def rpc_top_holder_concentration(
     session: aiohttp.ClientSession, mint: str,
 ) -> Optional[float]:
-    result, err = await _rpc_post(
-        session, "getTokenLargestAccounts",
-        [mint, {"commitment": "confirmed"}],
-    )
+    """getTokenLargestAccounts lags behind getAccountInfo's indexing for
+    brand-new pump.fun mints: the mint account itself is valid and
+    parseable (mint/freeze authority calls succeed immediately) but the
+    RPC provider's token-holder index hasn't caught up yet, returning
+    -32602 'not a Token mint'. This is a timing race, not a permanent
+    failure — retry with a short backoff before giving up.
+    """
+    last_err = None
+    result, err = None, None
+    for attempt, delay in enumerate((0, 1.5, 3.0)):
+        if delay:
+            await asyncio.sleep(delay)
+        result, err = await _rpc_post(
+            session, "getTokenLargestAccounts",
+            [mint, {"commitment": "confirmed"}],
+        )
+        if err is None and result is not None:
+            break
+        last_err = err
+        # Only worth retrying the specific indexing-lag error; other
+        # errors (malformed mint, RPC down, unrelated 4xx) won't resolve
+        # on retry, so bail immediately for those.
+        if not err or "not a token mint" not in str(err).lower():
+            break
+
     if err or result is None:
-        log.debug("rpc_top_holder_concentration %s: %s", mint[:8], err)
+        log.debug("rpc_top_holder_concentration %s: %s", mint[:8], err or last_err)
         return None
     try:
         accounts = result.get("value") or []
@@ -311,4 +332,3 @@ def fetch_mc_momentum_from_db(mint: str, window_sec: int = 1800) -> float:
     except Exception as e:
         log.debug("fetch_mc_momentum_from_db %s: %s", mint[:8], e)
         return 0.0
-
