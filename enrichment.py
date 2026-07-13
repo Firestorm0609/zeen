@@ -262,6 +262,55 @@ async def rpc_creator_wallet_info(
         return None, None
 
 
+async def rpc_creator_holding_pct(
+    session: aiohttp.ClientSession, mint: str, creator: str,
+) -> Optional[float]:
+    """% of total token supply still held by the creator wallet.
+
+    This is the single most direct pump.fun-specific rug signal: the
+    creator/dev dumping their own bag is the dominant rug pattern on this
+    platform, distinct from generic 'top 5 unrelated holders' concentration
+    (which doesn't distinguish the creator from ordinary early buyers).
+    Returns None on failure (falls back to neutral in the feature layer).
+    """
+    if not mint or not creator:
+        return None
+
+    supply_result, supply_err = await _rpc_post(
+        session, "getTokenSupply", [mint, {"commitment": "confirmed"}],
+    )
+    if supply_err or supply_result is None:
+        log.debug("rpc_creator_holding_pct supply %s: %s", mint[:8], supply_err)
+        return None
+    try:
+        supply_raw = float((supply_result.get("value") or {}).get("amount", 0))
+    except Exception as e:
+        log.debug("rpc_creator_holding_pct supply parse %s: %s", mint[:8], e)
+        return None
+    if supply_raw <= 0:
+        return None
+
+    bal_result, bal_err = await _rpc_post(
+        session, "getTokenAccountsByOwner",
+        [creator, {"mint": mint}, {"encoding": "jsonParsed"}],
+    )
+    if bal_err or bal_result is None:
+        log.debug("rpc_creator_holding_pct balance %s: %s", mint[:8], bal_err)
+        return None
+    try:
+        accounts = (bal_result.get("value") or [])
+        creator_raw = 0.0
+        for acc in accounts:
+            info = (acc.get("account", {}).get("data", {})
+                       .get("parsed", {}).get("info", {})
+                       .get("tokenAmount", {}))
+            creator_raw += float(info.get("amount", 0))
+        return max(0.0, min(1.0, creator_raw / supply_raw))
+    except Exception as e:
+        log.debug("rpc_creator_holding_pct parse %s: %s", mint[:8], e)
+        return None
+
+
 async def enrich_with_rpc(coin: dict, session: aiohttp.ClientSession) -> dict:
     if not RPC_ENABLED:
         return coin
@@ -273,11 +322,12 @@ async def enrich_with_rpc(coin: dict, session: aiohttp.ClientSession) -> dict:
         return coin
 
     try:
-        auth_result, conc_result, bundle_result, hist_result = await asyncio.gather(
+        auth_result, conc_result, bundle_result, hist_result, dev_hold_result = await asyncio.gather(
             rpc_mint_authorities(session, mint),
             rpc_top_holder_concentration(session, mint),
             rpc_bundle_score(session, mint),
             rpc_creator_wallet_info(session, creator),
+            rpc_creator_holding_pct(session, mint, creator),
             return_exceptions=True,
         )
 
@@ -294,15 +344,18 @@ async def enrich_with_rpc(coin: dict, session: aiohttp.ClientSession) -> dict:
                 coin["_rpc_creator_tx_count"] = tx_count
             if isinstance(age_days, (int, float)):
                 coin["_rpc_creator_wallet_age_days"] = float(age_days)
+        if isinstance(dev_hold_result, (int, float)):
+            coin["_rpc_creator_holding_pct"] = float(dev_hold_result)
 
         log.debug(
-            "RPC enriched %s | mint_auth=%s freeze=%s top5=%s bundle=%s creator_txs=%s",
+            "RPC enriched %s | mint_auth=%s freeze=%s top5=%s bundle=%s creator_txs=%s dev_hold=%s",
             mint[:8],
             coin.get("_rpc_mint_auth_revoked"),
             coin.get("_rpc_freeze_auth_revoked"),
             coin.get("_rpc_top5_concentration"),
             coin.get("_rpc_bundle_score"),
             coin.get("_rpc_creator_tx_count"),
+            coin.get("_rpc_creator_holding_pct"),
         )
     except Exception as e:
         log.warning("enrich_with_rpc %s: %s", mint[:8], e)

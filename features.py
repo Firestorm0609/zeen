@@ -284,5 +284,15 @@ def _(ctx):
                or ctx.coin.get("traderPublicKey") or "")
     return 0.0 if is_creator_blacklisted(creator) else 1.0
 
+@FEATURES.register("creator_holding_safety")
+def _(ctx):
+    """1.0 = creator holds ~none of the token supply (safer), 0.0 = creator
+    still holds most of supply (high dev-dump risk — the dominant pump.fun
+    rug pattern). Unknown (RPC failed / not yet populated) -> neutral 0.5,
+    consistent with the other on-chain safety features."""
+    raw = ctx.coin.get("_rpc_creator_holding_pct")
+    if raw is None: return 0.5
+    return 1.0 - safe_float(raw, 0.5)
+
 
 log.info("FeatureRegistry: %d features registered", len(FEATURES))

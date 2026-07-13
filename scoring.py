@@ -50,17 +50,34 @@ class ScoringEngine:
         "social_completeness":    2.5,
         "mc_momentum_pct":        2.5,
         "bonding_curve_progress": 2.0,
-        "keyword_pump_score":     2.0,
+        # Description/keyword features showed the most consistent (still
+        # modest, but statistically real at n=132k) separation between
+        # PUMP/MOON and RUG outcomes in shadow-backtest analysis — bumped up.
+        "keyword_pump_score":     3.0,
+        "keyword_positive_hits":  1.8,
+        "desc_word_count_log":    1.5,
+        "desc_len_log":           1.3,
+        "has_telegram":           1.2,
         "reply_percentile":       1.5,
         "mc_percentile":          1.5,
         "desc_unique_word_ratio": 1.2,
         "coin_age_capped":        0.5,
-        "mint_auth_safety":       2.0,
-        "freeze_auth_safety":     1.5,
+        # mint_auth_safety / freeze_auth_safety removed: pump.fun's bonding-
+        # curve contract revokes both by default on ~every token regardless
+        # of outcome, so these carry ~zero real information on this platform
+        # (confirmed via feature_analysis.py over 132k labeled signals).
+        # Left at 0.0 rather than deleted so they're still computed/logged
+        # for visibility, just excluded from the formula score.
+        "mint_auth_safety":       0.0,
+        "freeze_auth_safety":     0.0,
         "holder_distribution":    2.5,
         "bundle_clean":           3.0,
         "creator_freshness":      1.2,
         "creator_blacklisted":    4.0,
+        # New: direct dev-dump signal, not yet validated — moderate weight
+        # until enough labeled data accumulates to confirm it's predictive
+        # via feature_analysis.py. Re-tune once that data exists.
+        "creator_holding_safety": 2.5,
     }
 
     # Drift detection threshold (AUC drop >= this triggers warning)
@@ -457,5 +474,9 @@ class ScoringEngine:
         creator_txs = ctx.coin.get("_rpc_creator_tx_count")
         if creator_txs is not None and safe_int(creator_txs) >= 150:
             flags.append(f"serial launcher wallet ({safe_int(creator_txs)} txs)")
+
+        dev_hold = ctx.coin.get("_rpc_creator_holding_pct")
+        if dev_hold is not None and safe_float(dev_hold) > 0.20:
+            flags.append(f"creator holds {safe_float(dev_hold):.0%} of supply")
 
         return flags
