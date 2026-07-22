@@ -10,7 +10,7 @@ from telegram.ext import (
 )
 
 from .background import (
-    db_backup_loop, dead_letter_retry_loop,
+    db_backup_loop, dead_letter_retry_loop, fast_poll_loop,
     outcome_notify_loop, stream_watchdog_loop, watchlist_monitor_loop,
 )
 from .config import BOT_TOKEN, LOG_PATH, MODEL_VERSION
@@ -166,6 +166,8 @@ async def run() -> None:
                 watchlist_monitor_loop(app.bot),         name="watchlist_monitor"),
             asyncio.create_task(
                 real_monitor_loop(app.bot, state),     name="real_monitor"),
+            asyncio.create_task(
+                fast_poll_loop(),                        name="fast_poll"),
             # blacklist_refresh_loop removed: BlacklistCache already auto-refreshes
             # via its internal TTL on every lookup — a separate loop was redundant.
         ]
@@ -215,4 +217,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
