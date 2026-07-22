@@ -116,6 +116,14 @@ DEAD_LETTER_FALLBACK_MAX_BYTES = _int("DEAD_LETTER_FALLBACK_MAX_BYTES", 10 * 102
 # Blacklist cache
 BLACKLIST_CACHE_TTL_SEC = _int("BLACKLIST_CACHE_TTL_SEC", 60)
 
+# Fast-poll snapshots (fills the gap between fixed lookback checkpoints so
+# short-lived pumps/dumps that happen between 0min and the 15min checkpoint
+# are still visible in price_snapshots for backtesting / analysis).
+FAST_POLL_ENABLED      = _bool("FAST_POLL_ENABLED", True)
+FAST_POLL_INTERVAL_SEC = _int("FAST_POLL_INTERVAL_SEC", 75)       # seconds between sweeps
+FAST_POLL_WINDOW_SEC   = _int("FAST_POLL_WINDOW_SEC", 2 * 3600)   # only poll coins younger than this
+FAST_POLL_BATCH_LIMIT  = _int("FAST_POLL_BATCH_LIMIT", 100)       # max mints per sweep
+
 # Solana RPC
 SOLANA_RPC_URL        = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
 RPC_ENABLED           = _bool("RPC_ENABLED", True)
