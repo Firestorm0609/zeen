@@ -11,9 +11,10 @@ window.
 Usage:
     cd ~/zeen
     python3 check_2x_alerts.py
-    python3 check_2x_alerts.py --threshold 7 --days 14
+    python3 check_2x_alerts.py --threshold 8 --days 30
     python3 check_2x_alerts.py --multiple 3 --days 30      # check 3x instead
     python3 check_2x_alerts.py --window-hours 24           # max hold time
+    python3 check_2x_alerts.py --out results.txt           # custom output file
 """
 import argparse
 import os
@@ -39,6 +40,8 @@ def main():
     ap.add_argument("--window-hours", type=float, default=24.0,
                      help="max hours after signal to count as a hit (default 24h)")
     ap.add_argument("--db", type=str, default=DB_PATH)
+    ap.add_argument("--out", type=str, default="check_2x_results.txt",
+                     help="file to write the report to (default: check_2x_results.txt)")
     args = ap.parse_args()
 
     if not os.path.exists(args.db):
@@ -47,6 +50,12 @@ def main():
 
     since_ts = int(time.time()) - args.days * 86400
     window_sec = int(args.window_hours * 3600)
+
+    lines = []
+
+    def out(s=""):
+        print(s)
+        lines.append(s)
 
     with closing(sqlite3.connect(args.db)) as conn:
         conn.row_factory = sqlite3.Row
@@ -61,7 +70,9 @@ def main():
         """, (args.threshold, since_ts)).fetchall()
 
         if not signals:
-            print(f"No signals with score >= {args.threshold} in the last {args.days}d.")
+            out(f"No signals with score >= {args.threshold} in the last {args.days}d.")
+            with open(args.out, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
             return
 
         hits = []
@@ -109,31 +120,35 @@ def main():
     n_nodata = len(no_data)
     tracked = n_hit + n_miss
 
-    print("=" * 70)
-    print(f"  ALERT -> {args.multiple}x CHECK  (score >= {args.threshold}, last {args.days}d, "
-          f"hold window {args.window_hours}h)")
-    print("=" * 70)
-    print(f"  Total alerts        : {total}")
-    print(f"  Reached {args.multiple}x        : {n_hit}")
-    print(f"  Did NOT reach {args.multiple}x  : {n_miss}")
-    print(f"  No snapshot data    : {n_nodata}  (bot wasn't tracking / too recent)")
+    out("=" * 70)
+    out(f"  ALERT -> {args.multiple}x CHECK  (score >= {args.threshold}, last {args.days}d, "
+        f"hold window {args.window_hours}h)")
+    out("=" * 70)
+    out(f"  Total alerts        : {total}")
+    out(f"  Reached {args.multiple}x        : {n_hit}")
+    out(f"  Did NOT reach {args.multiple}x  : {n_miss}")
+    out(f"  No snapshot data    : {n_nodata}  (bot wasn't tracking / too recent)")
     if tracked:
-        print(f"  Hit rate (of tracked): {n_hit/tracked*100:.1f}%")
-    print("-" * 70)
+        out(f"  Hit rate (of tracked): {n_hit/tracked*100:.1f}%")
+    out("-" * 70)
 
     if hits:
-        print(f"\n  ✅ HIT {args.multiple}x:")
+        out(f"\n  HIT {args.multiple}x:")
         for name, score, entry_mc, mins, mint in sorted(hits, key=lambda x: x[3]):
-            print(f"    {name:<20} score {score}/10  entry ${entry_mc:,.0f}  "
-                  f"hit in {mins:.0f}m  [{mint[:8]}]")
+            out(f"    {name:<20} score {score}/10  entry ${entry_mc:,.0f}  "
+                f"hit in {mins:.0f}m  [{mint[:8]}]")
 
     if misses:
-        print(f"\n  ❌ MISSED {args.multiple}x (best peak shown):")
+        out(f"\n  MISSED {args.multiple}x (best peak shown):")
         for name, score, entry_mc, peak_mult, mint in sorted(misses, key=lambda x: -x[3]):
-            print(f"    {name:<20} score {score}/10  entry ${entry_mc:,.0f}  "
-                  f"peak {peak_mult:.2f}x  [{mint[:8]}]")
+            out(f"    {name:<20} score {score}/10  entry ${entry_mc:,.0f}  "
+                f"peak {peak_mult:.2f}x  [{mint[:8]}]")
 
-    print("=" * 70)
+    out("=" * 70)
+
+    with open(args.out, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    print(f"\nFull report written to: {os.path.abspath(args.out)}")
 
 
 if __name__ == "__main__":
