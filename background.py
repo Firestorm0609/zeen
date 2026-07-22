@@ -13,7 +13,9 @@ from telegram.error import TelegramError
 
 from .config import (
     DB_BACKUP_INTERVAL_SEC, DB_BACKUP_PATH,
-    DEAD_LETTER_MAX_RETRIES, DEAD_LETTER_RETRY_SEC, OUTCOME_NOTIFY_ENABLED,
+    DEAD_LETTER_MAX_RETRIES, DEAD_LETTER_RETRY_SEC,
+    FAST_POLL_BATCH_LIMIT, FAST_POLL_ENABLED, FAST_POLL_INTERVAL_SEC,
+    FAST_POLL_WINDOW_SEC, OUTCOME_NOTIFY_ENABLED,
     OUTCOME_NOTIFY_MIN_PCT, PUMP_FRONT, STREAM_DEAD_ALERT_SEC,
     STREAM_DEAD_COOLDOWN_SEC,
 )
@@ -288,3 +290,56 @@ async def dead_letter_retry_loop(
             log.error("dead_letter_retry_loop: %s", e)
         await asyncio.sleep(DEAD_LETTER_RETRY_SEC)
 
+
+# ---------- Fast-poll snapshots ----------
+
+async def fast_poll_loop() -> None:
+    """Poll price for recently-signaled mints on a short interval.
+
+    The fixed lookback checkpoints (15min/1hr/4hr/...) leave large gaps in
+    price_snapshots during a coin's early life, which is exactly when
+    pump.fun coins move fastest. This loop densifies that window so
+    backtests (check_2x_alerts.py, feature_analysis.py) and any future
+    exit logic can see peaks that happen between checkpoints, instead of
+    only seeing whatever price happened to exist at the next scheduled
+    check-in.
+
+    This is purely additive: it does not touch the lookbacks table or the
+    ML labeling pipeline, only price_snapshots.
+    """
+    if not FAST_POLL_ENABLED:
+        log.info("fast_poll_loop disabled via FAST_POLL_ENABLED=false")
+        return
+
+    await asyncio.sleep(30)  # let the bot finish starting up first
+    while True:
+        try:
+            cutoff = now_ts() - FAST_POLL_WINDOW_SEC
+            with closing(db_conn()) as conn:
+                rows = conn.execute("""
+                    SELECT DISTINCT mint FROM signals
+                    WHERE created_at >= ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                """, (cutoff, FAST_POLL_BATCH_LIMIT)).fetchall()
+
+            mints = [r["mint"] for r in rows if r["mint"]]
+            if mints:
+                async with aiohttp.ClientSession() as session:
+                    for mint in mints:
+                        try:
+                            mc = await fetch_coin_mc(session, mint)
+                            if mc is not None and mc > 0:
+                                def _w(m=mint, v=mc):
+                                    with closing(db_conn()) as c, c:
+                                        c.execute(
+                                            "INSERT INTO price_snapshots"
+                                            "(mint,market_cap,created_at) VALUES(?,?,?)",
+                                            (m, v, now_ts()))
+                                db_write(_w)
+                        except Exception as e:
+                            log.debug("fast_poll %s: %s", mint[:8], e)
+                log.debug("fast_poll_loop: swept %d mints", len(mints))
+        except Exception as e:
+            log.error("fast_poll_loop: %s", e)
+        await asyncio.sleep(FAST_POLL_INTERVAL_SEC)
