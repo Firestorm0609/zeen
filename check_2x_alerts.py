@@ -14,6 +14,7 @@ Usage:
     python3 check_2x_alerts.py --threshold 8 --days 30
     python3 check_2x_alerts.py --multiple 3 --days 30      # check 3x instead
     python3 check_2x_alerts.py --window-hours 24           # max hold time
+    python3 check_2x_alerts.py --min-mc 40000 --max-mc 100000   # filter by entry MC range
     python3 check_2x_alerts.py --out results.txt           # custom output file
 """
 import argparse
@@ -39,6 +40,10 @@ def main():
     ap.add_argument("--days", type=int, default=30, help="lookback window in days")
     ap.add_argument("--window-hours", type=float, default=24.0,
                      help="max hours after signal to count as a hit (default 24h)")
+    ap.add_argument("--min-mc", type=float, default=0.0,
+                     help="only include signals with entry market cap >= this (default: no min)")
+    ap.add_argument("--max-mc", type=float, default=0.0,
+                     help="only include signals with entry market cap <= this (default: no max)")
     ap.add_argument("--db", type=str, default=DB_PATH)
     ap.add_argument("--out", type=str, default="check_2x_results.txt",
                      help="file to write the report to (default: check_2x_results.txt)")
@@ -59,18 +64,36 @@ def main():
 
     with closing(sqlite3.connect(args.db)) as conn:
         conn.row_factory = sqlite3.Row
-        signals = conn.execute("""
+
+        query = """
             SELECT id, mint, name, symbol, score, probability,
                    market_cap_at_signal, created_at
             FROM signals
             WHERE score >= ?
               AND created_at >= ?
               AND market_cap_at_signal > 0
-            ORDER BY created_at ASC
-        """, (args.threshold, since_ts)).fetchall()
+        """
+        params = [args.threshold, since_ts]
+
+        if args.min_mc > 0:
+            query += " AND market_cap_at_signal >= ?"
+            params.append(args.min_mc)
+        if args.max_mc > 0:
+            query += " AND market_cap_at_signal <= ?"
+            params.append(args.max_mc)
+
+        query += " ORDER BY created_at ASC"
+
+        signals = conn.execute(query, params).fetchall()
+
+        mc_range_str = ""
+        if args.min_mc > 0 or args.max_mc > 0:
+            lo = f"${args.min_mc:,.0f}" if args.min_mc > 0 else "$0"
+            hi = f"${args.max_mc:,.0f}" if args.max_mc > 0 else "∞"
+            mc_range_str = f", MC {lo}-{hi}"
 
         if not signals:
-            out(f"No signals with score >= {args.threshold} in the last {args.days}d.")
+            out(f"No signals with score >= {args.threshold}{mc_range_str} in the last {args.days}d.")
             with open(args.out, "w", encoding="utf-8") as f:
                 f.write("\n".join(lines) + "\n")
             return
@@ -121,7 +144,7 @@ def main():
     tracked = n_hit + n_miss
 
     out("=" * 70)
-    out(f"  ALERT -> {args.multiple}x CHECK  (score >= {args.threshold}, last {args.days}d, "
+    out(f"  ALERT -> {args.multiple}x CHECK  (score >= {args.threshold}{mc_range_str}, last {args.days}d, "
         f"hold window {args.window_hours}h)")
     out("=" * 70)
     out(f"  Total alerts        : {total}")
